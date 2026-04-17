@@ -1,18 +1,1 @@
-let electron = require("electron");
-//#region ../dist/preload.js
-function exposeIpc(contextBridge, ipcRenderer, apiKey = "electronIpc") {
-	contextBridge.exposeInMainWorld(apiKey, {
-		invoke: (channel, payload) => ipcRenderer.invoke(channel, payload),
-		on: (channel, listener) => {
-			ipcRenderer.on(channel, listener);
-		},
-		off: (channel, listener) => {
-			ipcRenderer.off(channel, listener);
-		}
-	});
-}
-//#endregion
-//#region src/preload.ts
-exposeIpc(electron.contextBridge, electron.ipcRenderer);
-electron.contextBridge.exposeInMainWorld("env", { mode: process.env.NODE_ENV });
-//#endregion
+let e=require(`electron`);function t(e,t,n=`electronIpc`){e.exposeInMainWorld(n,{invoke:(e,n)=>t.invoke(e,n),on:(e,n)=>{t.on(e,n)},off:(e,n)=>{t.off(e,n)}})}t(e.contextBridge,e.ipcRenderer),e.contextBridge.exposeInMainWorld(`env`,{mode:process.env.NODE_ENV});

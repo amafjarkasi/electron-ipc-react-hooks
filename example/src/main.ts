@@ -15,20 +15,23 @@ type Context = {
 const t = initIpc<Context>()
 
 // 2. Define a simple Logging Middleware
-const loggerMiddleware = t.procedure.use(async ({ input, ctx, next }) => {
+const loggerMiddleware = t.middleware(async ({ input, ctx, path, type, next }) => {
   const start = Date.now()
-  console.log(`[IPC] ${ctx.event.senderFrame.url} called with:`, input)
+  const senderUrl = ctx.event.senderFrame?.url || 'Unknown';
+  console.log(`[IPC] [${type}] ${path} called by ${senderUrl} with:`, input)
   
-  const result = await next({ ctx })
+  const result = await next()
   
   const duration = Date.now() - start
-  console.log(`[IPC] Response in ${duration}ms`)
+  console.log(`[IPC] [${type}] ${path} responded in ${duration}ms`)
   return result
 })
 
+const protectedProcedure = t.procedure.use(loggerMiddleware)
+
 // 3. Define a "system" sub-router
 const systemRouter = t.router({
-  getInfo: loggerMiddleware.query(() => ({
+  getInfo: protectedProcedure.query(() => ({
     platform: process.platform,
     arch: process.arch,
     nodeVersion: process.versions.node,
@@ -43,12 +46,19 @@ const appRouter = t.router({
   system: systemRouter,
   
   // Root level procedures
-  echoReverse: loggerMiddleware
+  echoReverse: protectedProcedure
     .input(z.object({ text: z.string() }))
     .mutation(async ({ input }) => {
       await new Promise(r => setTimeout(r, 500))
       return input.text.split('').reverse().join('')
     }),
+
+  helloContext: protectedProcedure.query(({ ctx }) => {
+    // Show context-aware handler (e.g., "Hello from [Window Title]")
+    const sender = ctx.event.sender;
+    const windowTitle = BrowserWindow.fromWebContents(sender)?.getTitle() || 'Unknown Window';
+    return `Hello from ${windowTitle}`;
+  }),
 
   throwError: t.procedure
     .input(z.object({ shouldThrow: z.boolean() }))
@@ -72,6 +82,7 @@ function createWindow() {
     height: 700,
     minWidth: 700,
     minHeight: 500,
+    title: 'My Electron App',
     webPreferences: {
       preload: join(__dirname, 'preload.js'),
       contextIsolation: true,

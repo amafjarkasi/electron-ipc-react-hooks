@@ -19,7 +19,7 @@ export interface Procedure<TInput, TOutput, TType extends ProcedureType, TContex
   _input: TInput;
   _output: TOutput;
   _ctx: TContext;
-  (opts: { input: TInput; ctx: TContext }): Promise<TOutput>;
+  (opts: { input: TInput; ctx: TContext; path: string }): Promise<TOutput>;
 }
 
 export type AnyProcedure = Procedure<any, any, any, any>;
@@ -28,7 +28,9 @@ export type AnyRouter = { [key: string]: AnyProcedure | AnyRouter };
 export type Middleware<TInput, TContext, TNewContext> = (opts: {
   input: TInput;
   ctx: TContext;
-  next: (opts: { ctx: TNewContext }) => Promise<any>;
+  path: string;
+  type: ProcedureType;
+  next: (opts?: { ctx: TNewContext }) => Promise<any>;
 }) => Promise<any>;
 
 export class ProcedureBuilder<TInput = void, TContext = any> {
@@ -64,7 +66,7 @@ export class ProcedureBuilder<TInput = void, TContext = any> {
     type: TType,
     resolver: (opts: { input: TInput; ctx: TContext }) => Promise<TOutput> | TOutput
   ): Procedure<TInput, TOutput, TType, TContext> {
-    const procedure = async (opts: { input: TInput; ctx: TContext }) => {
+    const procedure = async (opts: { input: TInput; ctx: TContext; path: string }) => {
       let validInput = opts.input;
       if (this.schema) {
         validInput = await this.schema.parseAsync(opts.input);
@@ -80,7 +82,9 @@ export class ProcedureBuilder<TInput = void, TContext = any> {
         return middleware({
           input: validInput,
           ctx: currentCtx,
-          next: ({ ctx }) => callRecursive(index + 1, ctx),
+          path: opts.path,
+          type: type,
+          next: (nextOpts?: { ctx: any }) => callRecursive(index + 1, nextOpts?.ctx ?? currentCtx),
         });
       };
 
@@ -101,6 +105,11 @@ export function initIpc<TContext = { event: IpcMainInvokeEvent }>() {
     procedure: new ProcedureBuilder<void, TContext>(),
     router<TRouter extends AnyRouter>(routerObj: TRouter): TRouter {
       return routerObj;
+    },
+    middleware<TNewContext = TContext>(
+      fn: Middleware<any, TContext, TNewContext>
+    ) {
+      return fn;
     }
   };
 }
@@ -122,7 +131,7 @@ export function bindIpcRouter(
         ipcMain.handle(currentPath, async (event, input) => {
           try {
             const ctx = createContext ? await createContext(event) : { event };
-            const result = await procedure({ input, ctx });
+            const result = await procedure({ input, ctx, path: currentPath });
             return { data: result };
           } catch (e: any) {
             if (e instanceof IpcError) {
@@ -139,7 +148,7 @@ export function bindIpcRouter(
         ipcMain.on(currentPath, async (event, input) => {
           try {
             const ctx = createContext ? await createContext(event) : { event };
-            await procedure({ input, ctx });
+            await procedure({ input, ctx, path: currentPath });
           } catch (error) {
             console.error(`Error in subscription ${currentPath}:`, error);
           }
@@ -151,3 +160,4 @@ export function bindIpcRouter(
     }
   }
 }
+

@@ -18,7 +18,7 @@
 
 > [!NOTE] 
 > **The Problem with Legacy Tooling**
-> Legacy frameworks (like `electron-reactive-event`) solved type safety via convoluted CLI step generation or highly complex, manually matched `React.Context` bindings. This required redundant schema definitions and wrapping plain `useEffect` functions to try and mock functionality already perfected by data-fetching libraries.
+> Legacy frameworks solved type safety via convoluted CLI step generation or highly complex, manually matched `React.Context` bindings. This required redundant schema definitions and wrapping plain `useEffect` functions to try and mock functionality already perfected by data-fetching libraries.
 
 **Our Solution**: You define a native router in the Main Process. The type of that router securely bridges back across the preload context script directly to your renderer inside a **TanStack React Query wrapper**. This provides native `{ data, isLoading, error }` state-management inside React—giving you the most powerful developer experience possible.
 
@@ -28,7 +28,7 @@
 
 The framework leverages modern tools to deliver the fastest and safest developer experience:
 * **`Typescript` (End-to-End Type Safety)**: The arguments and returned values of your main process backend handlers instantly manifest into autocomplete suggestions in your React front end.
-* **`Zod` Runtime Validation**: Type safety doesn't protect you at runtime. Cross-boundary payloads are vulnerable! Utilizing Zod automatically enforces runtime constraints over the data payloads injected by the Renderer across the bridge.
+* **`Zod` Validation**: Automatically validates data sent between the React front end and the Node.js backend to ensure it is safe at runtime.
 * **`@tanstack/react-query`**: No more manual loading state indicators, error catches, or repetitive `useEffect` calls in React. The unified `useQuery` / `useMutation` API gives your components absolute control.
 * **`Vitest` Integration Capabilities**: Handlers built into your IPC router execute flawlessly in standard Unit Tests, making TDD an absolute breeze.
 
@@ -165,7 +165,7 @@ export default function App() {
 Implement cross-cutting concerns (logging, auth, performance) using the `.use()` pipeline. Middlewares can intercept inputs, modify context, or block execution.
 
 ```typescript
-const t = initIpc();
+const t = initIpc<{ user?: string }>();
 
 const loggingMiddleware = t.middleware(async ({ next, path, type }) => {
   const start = Date.now();
@@ -174,10 +174,18 @@ const loggingMiddleware = t.middleware(async ({ next, path, type }) => {
   return result;
 });
 
-const protectedProcedure = t.procedure.use(loggingMiddleware);
+// Middleware that modifies context
+const authMiddleware = t.middleware(async ({ next, ctx }) => {
+  if (!ctx.user) throw new Error('Unauthorized');
+  return next({
+    ctx: { ...ctx, user: ctx.user + '_verified' } // Infers new context type automatically!
+  });
+});
+
+const protectedProcedure = t.procedure.use(loggingMiddleware).use(authMiddleware);
 
 const appRouter = t.router({
-  getSensitiveData: protectedProcedure.query(() => ({ secret: '42' })),
+  getSensitiveData: protectedProcedure.query(({ ctx }) => ({ secret: '42', user: ctx.user })),
 });
 ```
 

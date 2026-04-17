@@ -6,6 +6,7 @@ function App() {
   const [inputText, setInputText] = useState('')
 
   const { data: sysInfo, isLoading: sysLoading } = ipc.system.getInfo.useQuery(undefined)
+  const { data: helloMsg, isLoading: helloLoading } = ipc.helloContext.useQuery(undefined)
   const echoMutation = ipc.echoReverse.useMutation()
   const errorMutation = ipc.throwError.useMutation()
 
@@ -58,6 +59,19 @@ function App() {
                   <tr><td>Chrome</td><td>{sysInfo?.chromeVersion}</td></tr>
                 </tbody>
               </table>
+            )}
+            
+            <div className="card-header" style={{ marginTop: '20px' }}>
+              <div className="card-icon purple">👋</div>
+              <h2>Context-Aware Handler</h2>
+            </div>
+            {helloLoading ? (
+              <p className="subtitle">Fetching greeting…</p>
+            ) : (
+              <div className="result-block" style={{ marginTop: '10px' }}>
+                <div className="result-label">Greeting</div>
+                {helloMsg}
+              </div>
             )}
           </div>
 
