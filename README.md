@@ -197,6 +197,94 @@ test('Zod strictly blocks malformed profiles', async () => {
 
 ---
 
+## 🚀 Example Application
+
+A fully working Electron + Vite + React example app lives in the [`/example`](./example/) directory.
+It demonstrates all three IPC patterns — query, mutation, and error handling — in a running desktop application.
+
+### Running the example
+
+```bash
+cd example
+npm install
+npm run build
+npx electron .
+```
+
+The example features:
+- **System Context** — a `useQuery` that fetches real `process.platform`, Electron version, Node version, etc. from the main process
+- **IPC Mutation** — a `useMutation` that sends text to the main process, waits 500ms, and returns the reversed string (proving async round-trip works)
+- **Error Boundaries** — a mutation that intentionally throws inside the main process and surfaces the error cleanly through React Query's `error` state, with no uncaught promise rejections
+
+### Example tech stack
+
+| Layer | Tool |
+|---|---|
+| Desktop shell | [Electron](https://www.electronjs.org/) |
+| Bundler | [Vite](https://vitejs.dev/) + [vite-plugin-electron](https://github.com/electron-vite/vite-plugin-electron) |
+| UI framework | [React 19](https://react.dev/) |
+| IPC layer | `electron-ipc-react-hooks` (this library, linked via `file:..`) |
+
+---
+
+## 🔧 Troubleshooting
+
+### Duplicate React / `useContext is null` crash
+
+When consuming this library via a local `file:` link (e.g. `"electron-ipc-react-hooks": "file:.."`), npm may install a second copy of `react` and `@tanstack/react-query` inside the library's `node_modules`. This causes React's context system to fail with:
+
+```
+TypeError: Cannot read properties of null (reading 'useContext')
+```
+
+**Fix** — add `resolve.dedupe` and explicit aliases to your `vite.config.ts`:
+
+```ts
+import { resolve } from 'path'
+
+export default defineConfig({
+  resolve: {
+    dedupe: ['react', 'react-dom', '@tanstack/react-query'],
+    alias: {
+      'react': resolve('./node_modules/react'),
+      'react-dom': resolve('./node_modules/react-dom'),
+      '@tanstack/react-query': resolve('./node_modules/@tanstack/react-query'),
+    }
+  },
+  // ...
+})
+```
+
+This pins all React imports to your app's `node_modules`, eliminating the duplicate instance.
+
+---
+
+### Chromium disk cache errors on Windows
+
+When launching with `npx electron .`, you may see repeated errors like:
+
+```
+[ERROR:disk_cache.cc:284] Unable to create cache
+[ERROR:gpu_disk_cache.cc:725] Gpu Cache Creation failed: -2
+```
+
+These occur because multiple Electron processes share the same default `userData`/cache path and Windows file locking prevents concurrent writes.
+
+**Fix** — call `app.setPath()` **before** `app.whenReady()` in your `main.ts` to point Electron at a dedicated, writable directory:
+
+```ts
+import { app } from 'electron'
+import { join } from 'path'
+import * as os from 'os'
+
+// Must be called before app.whenReady()
+app.setPath('userData', join(os.homedir(), '.your-app-name'))
+
+app.whenReady().then(() => { /* ... */ })
+```
+
+---
+
 <div align="center">
   <sub>Built to exponentially expand the boundaries of the Electron developer experience.</sub>
 </div>

@@ -4,6 +4,11 @@ import * as os from 'os'
 import { initIpc, bindIpcRouter } from 'electron-ipc-react-hooks/main'
 import { z } from 'zod'
 
+// Point Electron's cache/userData to a writable location before the app is ready.
+// This prevents Chromium's "Unable to create cache / Access is denied" errors that
+// occur when another Electron instance holds a lock on the default temp path.
+app.setPath('userData', join(os.homedir(), '.electron-ipc-example'))
+
 // Create a builder
 const t = initIpc()
 
@@ -48,8 +53,10 @@ app.whenReady().then(() => {
   bindIpcRouter(ipcMain, appRouter)
 
   const win = new BrowserWindow({
-    width: 800,
-    height: 600,
+    width: 920,
+    height: 700,
+    minWidth: 700,
+    minHeight: 500,
     webPreferences: {
       preload: join(__dirname, 'preload.js'),
       // Security best practices

@@ -4,116 +4,118 @@ import './index.css'
 
 function App() {
   const [inputText, setInputText] = useState('')
-  
-  // 1. Fetching Data using queries
-  const { data: sysInfo, isLoading: sysLoading } = ipc.getSystemInfo.useQuery()
-  
-  // 2. Mutations
+
+  const { data: sysInfo, isLoading: sysLoading } = ipc.getSystemInfo.useQuery(undefined)
   const echoMutation = ipc.echoReverse.useMutation()
-  
-  // 3. Error Handling Demo
   const errorMutation = ipc.throwError.useMutation()
 
-  const handleEcho = () => {
-    if (!inputText) return
-    echoMutation.mutate({ text: inputText })
-  }
-
-  const handleError = () => {
-    errorMutation.mutate({ shouldThrow: true })
-  }
-
   return (
-    <div className="container">
-      <div className="header">
-        <h1>Type-Safe IPC</h1>
-        <p>A beautiful demonstration of <code>electron-ipc-react-hooks</code> utilizing tRPC-like routing, TanStack Query, and Zod validation across the IPC bridge.</p>
-      </div>
+    <div id="root">
+      <div className="container">
 
-      <div className="card-grid">
-        {/* System Information Card */}
-        <div className="card">
-          <h2>System Context</h2>
-          {sysLoading ? (
-            <p>Loading system context...</p>
-          ) : (
-            <table className="data-table">
-              <tbody>
-                <tr>
-                  <th>Platform</th>
-                  <td>{sysInfo?.platform}</td>
-                </tr>
-                <tr>
-                  <th>Architecture</th>
-                  <td>{sysInfo?.arch}</td>
-                </tr>
-                <tr>
-                  <th>Node Version</th>
-                  <td>{sysInfo?.nodeVersion}</td>
-                </tr>
-                <tr>
-                  <th>Electron</th>
-                  <td>{sysInfo?.electronVersion}</td>
-                </tr>
-                <tr>
-                  <th>Chrome</th>
-                  <td>{sysInfo?.chromeVersion}</td>
-                </tr>
-              </tbody>
-            </table>
-          )}
+        {/* ── Header ── */}
+        <div className="header">
+          <div className="header-badge">⚡ electron-ipc-react-hooks</div>
+          <h1>Type-Safe IPC</h1>
+          <p>
+            A live demonstration of <code>electron-ipc-react-hooks</code> — tRPC-style routing,
+            TanStack Query integration, and Zod validation across the IPC bridge.
+          </p>
         </div>
 
-        {/* Mutate Data Card */}
-        <div className="card">
-          <h2>Interactive Mutation</h2>
-          <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem' }}>
-            Send text to the main process. It will artificially delay for 500ms and reverse the string, proving async mutation works.
-          </p>
-          <div className="input-group">
-            <input 
-              type="text" 
-              placeholder="Enter text to reverse..." 
-              value={inputText}
-              onChange={(e) => setInputText(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && handleEcho()}
-            />
-            <button 
-              onClick={handleEcho}
-              disabled={echoMutation.isPending || !inputText}
-            >
-              {echoMutation.isPending ? 'Sending...' : 'Mutate'}
-            </button>
+        {/* ── Status pills ── */}
+        <div className="status-bar">
+          <div className="pill">
+            <span className="pill-dot" />
+            IPC Connected
           </div>
-          
-          {echoMutation.data && (
-            <div className="result">
-              <strong>Result:</strong> {echoMutation.data}
-            </div>
-          )}
+          <div className="pill">
+            🔒 Context Isolated
+          </div>
+          <div className="pill">
+            ⚛️ React {sysInfo ? 'Query Active' : 'Loading…'}
+          </div>
         </div>
 
-        {/* Error Handling Card */}
-        <div className="card">
-          <h2>Error Boundaries</h2>
-          <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem' }}>
-            Demonstrates how main process errors are safely caught, returned over IPC, and surface natively in React Query.
-          </p>
-          <div className="input-group">
-            <button 
-              onClick={handleError}
+        {/* ── Cards ── */}
+        <div className="card-grid">
+
+          {/* System Info */}
+          <div className="card">
+            <div className="card-header">
+              <div className="card-icon blue">🖥️</div>
+              <h2>System Context</h2>
+            </div>
+            {sysLoading ? (
+              <p className="subtitle">Fetching from main process…</p>
+            ) : (
+              <table className="data-table">
+                <tbody>
+                  <tr><td>Platform</td><td>{sysInfo?.platform}</td></tr>
+                  <tr><td>Architecture</td><td>{sysInfo?.arch}</td></tr>
+                  <tr><td>Node Version</td><td>{sysInfo?.nodeVersion}</td></tr>
+                  <tr><td>Electron</td><td>{sysInfo?.electronVersion}</td></tr>
+                  <tr><td>Chrome</td><td>{sysInfo?.chromeVersion}</td></tr>
+                </tbody>
+              </table>
+            )}
+          </div>
+
+          {/* Echo Mutation */}
+          <div className="card">
+            <div className="card-header">
+              <div className="card-icon purple">🔄</div>
+              <h2>IPC Mutation</h2>
+            </div>
+            <p className="subtitle">
+              Type text and send it to the main process. It delays 500ms and returns the reversed string.
+            </p>
+            <div className="input-group">
+              <input
+                type="text"
+                placeholder="Type something…"
+                value={inputText}
+                onChange={e => setInputText(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && echoMutation.mutate({ text: inputText })}
+              />
+              <button
+                onClick={() => echoMutation.mutate({ text: inputText })}
+                disabled={echoMutation.isPending || !inputText.trim()}
+              >
+                {echoMutation.isPending ? '…' : 'Send'}
+              </button>
+            </div>
+            {echoMutation.data && (
+              <div className="result-block">
+                <div className="result-label">Result</div>
+                {echoMutation.data}
+              </div>
+            )}
+          </div>
+
+          {/* Error Handling */}
+          <div className="card" style={{ gridColumn: '1 / -1' }}>
+            <div className="card-header">
+              <div className="card-icon red">🛡️</div>
+              <h2>Error Boundaries</h2>
+            </div>
+            <p className="subtitle">
+              Demonstrates how exceptions thrown in the main process are caught, serialized over IPC, and surfaced natively through React Query's error state — no uncaught promise rejections.
+            </p>
+            <button
+              className="danger"
+              onClick={() => errorMutation.mutate({ shouldThrow: true })}
               disabled={errorMutation.isPending}
-              style={{ background: '#ff4d4f', width: '100%' }}
             >
-              {errorMutation.isPending ? 'Throwing...' : 'Trigger Main Process Error'}
+              {errorMutation.isPending ? 'Throwing…' : 'Trigger Main Process Error'}
             </button>
+            {errorMutation.error && (
+              <div className="error-block">
+                <strong>Caught:</strong> {errorMutation.error.message}
+              </div>
+            )}
           </div>
-          
-          {errorMutation.error && (
-            <div className="error">
-              <strong>Caught Exception:</strong> {errorMutation.error.message}
-            </div>
-          )}
+
         </div>
       </div>
     </div>
