@@ -1,55 +1,92 @@
 import { useQuery, useMutation, type UseQueryOptions, type UseMutationOptions } from '@tanstack/react-query';
 
-type AnyProcedure = { _input: any; _output: any; _type: string };
-type AnyRouter = Record<string, AnyProcedure>;
+export class IpcError extends Error {
+  constructor(
+    public message: string,
+    public code?: string,
+    public data?: any
+  ) {
+    super(message);
+    this.name = 'IpcError';
+  }
+}
+
+type ProcedureType = 'query' | 'mutation' | 'subscription';
+
+type AnyProcedure = { 
+  _input: any; 
+  _output: any; 
+  _type: ProcedureType;
+};
+
+type AnyRouter = { [key: string]: AnyProcedure | AnyRouter };
 
 export type ReactIpcClient<TRouter extends AnyRouter> = {
-  [K in keyof TRouter]: TRouter[K] extends { _type: 'query', _input: infer I, _output: infer O }
-    ? {
-        useQuery: (
-          input: I,
-          options?: Omit<UseQueryOptions<O, Error, O, any>, 'queryKey' | 'queryFn'>
-        ) => ReturnType<typeof useQuery<O, Error, O, any>>;
-      }
-    : TRouter[K] extends { _type: 'mutation', _input: infer I, _output: infer O }
-    ? {
-        useMutation: (
-          options?: Omit<UseMutationOptions<O, Error, I, any>, 'mutationFn'>
-        ) => ReturnType<typeof useMutation<O, Error, I, any>>;
-      }
+  [K in keyof TRouter]: TRouter[K] extends AnyProcedure
+    ? (TRouter[K]['_type'] extends 'query'
+        ? {
+            useQuery: (
+              input: TRouter[K]['_input'],
+              options?: Omit<UseQueryOptions<TRouter[K]['_output'], Error, TRouter[K]['_output'], any>, 'queryKey' | 'queryFn'>
+            ) => ReturnType<typeof useQuery<TRouter[K]['_output'], Error, TRouter[K]['_output'], any>>;
+          }
+        : TRouter[K]['_type'] extends 'mutation'
+        ? {
+            useMutation: (
+              options?: Omit<UseMutationOptions<TRouter[K]['_output'], Error, TRouter[K]['_input'], any>, 'mutationFn'>
+            ) => ReturnType<typeof useMutation<TRouter[K]['_output'], Error, TRouter[K]['_input'], any>>;
+          }
+        : never)
+    : TRouter[K] extends AnyRouter
+    ? ReactIpcClient<TRouter[K]>
     : never;
 };
 
 export function createReactIpc<TRouter extends AnyRouter>(apiKey = 'electronIpc'): ReactIpcClient<TRouter> {
-  return new Proxy({} as ReactIpcClient<TRouter>, {
-    get(_, channel: string) {
-      return {
-        useQuery: (input: any, options?: any) => {
-          const api = (window as any)[apiKey];
-          if (!api) throw new Error(`Could not find window.${apiKey}`);
-          return useQuery({
-            queryKey: [channel, input],
-            queryFn: async () => {
-              const res = await api.invoke(channel, input);
-              if (res && res.error) throw new Error(res.error);
-              return res ? res.data : undefined;
-            },
-            ...options,
-          });
-        },
-        useMutation: (options?: any) => {
-          const api = (window as any)[apiKey];
-          if (!api) throw new Error(`Could not find window.${apiKey}`);
-          return useMutation({
-            mutationFn: async (input: any) => {
-              const res = await api.invoke(channel, input);
-              if (res && res.error) throw new Error(res.error);
-              return res ? res.data : undefined;
-            },
-            ...options,
-          });
+  const createProxy = (path: string[]): any => {
+    return new Proxy({}, {
+      get(_, prop: string) {
+        if (prop === 'useQuery') {
+          return (input: any, options?: any) => {
+            const api = (window as any)[apiKey];
+            if (!api) throw new Error(`Could not find window.${apiKey}`);
+            const channel = path.join('.');
+            return useQuery({
+              queryKey: [channel, input],
+              queryFn: async () => {
+                const res = await api.invoke(channel, input);
+                if (res && res.error) {
+                  throw new IpcError(res.error, res.code, res.data);
+                }
+                return res ? res.data : undefined;
+              },
+              ...options,
+            });
+          };
         }
-      };
-    }
-  });
+
+        if (prop === 'useMutation') {
+          return (options?: any) => {
+            const api = (window as any)[apiKey];
+            if (!api) throw new Error(`Could not find window.${apiKey}`);
+            const channel = path.join('.');
+            return useMutation({
+              mutationFn: async (input: any) => {
+                const res = await api.invoke(channel, input);
+                if (res && res.error) {
+                  throw new IpcError(res.error, res.code, res.data);
+                }
+                return res ? res.data : undefined;
+              },
+              ...options,
+            });
+          };
+        }
+
+        return createProxy([...path, prop]);
+      }
+    });
+  };
+
+  return createProxy([]);
 }

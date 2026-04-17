@@ -1,1 +1,167 @@
-var e=Object.create,t=Object.defineProperty,n=Object.getOwnPropertyDescriptor,r=Object.getOwnPropertyNames,i=Object.getPrototypeOf,a=Object.prototype.hasOwnProperty,o=(e,t)=>()=>(t||e((t={exports:{}}).exports,t),t.exports),s=(e,i,o,s)=>{if(i&&typeof i==`object`||typeof i==`function`)for(var c=r(i),l=0,u=c.length,d;l<u;l++)d=c[l],!a.call(e,d)&&d!==o&&t(e,d,{get:(e=>i[e]).bind(null,d),enumerable:!(s=n(i,d))||s.enumerable});return e},c=(n,r,a)=>(a=n==null?{}:e(i(n)),s(r||!n||!n.__esModule?t(a,`default`,{value:n,enumerable:!0}):a,n));let l=require(`electron`),u=require(`path`),d=require(`os`);d=c(d);let f=require(`zod`);var p=o((e=>{Object.defineProperty(e,`__esModule`,{value:!0}),e.ProcedureBuilder=void 0,e.initIpc=n,e.bindIpcRouter=r;var t=class e{schema;input(t){let n=new e;return n.schema=t,n}query(e){return this.createProcedure(`query`,e)}mutation(e){return this.createProcedure(`mutation`,e)}subscription(e){return this.createProcedure(`subscription`,e)}createProcedure(e,t){let n=async e=>{let n=e.input;return this.schema&&(n=await this.schema.parseAsync(e.input)),t({...e,input:n})};return n._type=e,n._input=null,n._output=null,n}};e.ProcedureBuilder=t;function n(){return{procedure:new t,router(e){return e}}}function r(e,t){for(let[n,r]of Object.entries(t))r._type===`query`||r._type===`mutation`?e.handle(n,async(e,t)=>{try{return{data:await r({input:t,event:e})}}catch(e){return{error:e.message||`Unknown error`}}}):r._type===`subscription`&&e.on(n,async(e,t)=>{try{await r({input:t,event:e})}catch(e){console.error(`Error in subscription ${n}:`,e)}})}}))();l.app.setPath(`userData`,(0,u.join)(d.homedir(),`.electron-ipc-example`));var m=(0,p.initIpc)(),h=m.router({getSystemInfo:m.procedure.query(()=>({platform:process.platform,arch:d.arch(),nodeVersion:process.versions.node,electronVersion:process.versions.electron,chromeVersion:process.versions.chrome})),echoReverse:m.procedure.input(f.z.object({text:f.z.string()})).mutation(async e=>(await new Promise(e=>setTimeout(e,500)),e.input.text.split(``).reverse().join(``))),throwError:m.procedure.input(f.z.object({shouldThrow:f.z.boolean()})).mutation(e=>{if(e.input.shouldThrow)throw Error(`This is an expected error thrown from the main process!`);return{success:!0}})});l.app.whenReady().then(()=>{(0,p.bindIpcRouter)(l.ipcMain,h);let e=new l.BrowserWindow({width:920,height:700,minWidth:700,minHeight:500,webPreferences:{preload:(0,u.join)(__dirname,`preload.js`),contextIsolation:!0,nodeIntegration:!1}});process.env.VITE_DEV_SERVER_URL?(e.loadURL(process.env.VITE_DEV_SERVER_URL),e.webContents.openDevTools()):e.loadFile((0,u.join)(__dirname,`../dist/index.html`))}),l.app.on(`window-all-closed`,()=>{process.platform!==`darwin`&&l.app.quit()});
+//#region \0rolldown/runtime.js
+var __create = Object.create;
+var __defProp = Object.defineProperty;
+var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
+var __getOwnPropNames = Object.getOwnPropertyNames;
+var __getProtoOf = Object.getPrototypeOf;
+var __hasOwnProp = Object.prototype.hasOwnProperty;
+var __copyProps = (to, from, except, desc) => {
+	if (from && typeof from === "object" || typeof from === "function") for (var keys = __getOwnPropNames(from), i = 0, n = keys.length, key; i < n; i++) {
+		key = keys[i];
+		if (!__hasOwnProp.call(to, key) && key !== except) __defProp(to, key, {
+			get: ((k) => from[k]).bind(null, key),
+			enumerable: !(desc = __getOwnPropDesc(from, key)) || desc.enumerable
+		});
+	}
+	return to;
+};
+var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__getProtoOf(mod)) : {}, __copyProps(isNodeMode || !mod || !mod.__esModule ? __defProp(target, "default", {
+	value: mod,
+	enumerable: true
+}) : target, mod));
+//#endregion
+let electron = require("electron");
+let path = require("path");
+let os = require("os");
+os = __toESM(os);
+let zod = require("zod");
+//#region ../dist/main.js
+var ProcedureBuilder = class ProcedureBuilder {
+	schema;
+	middlewares = [];
+	constructor(schema, middlewares = []) {
+		this.schema = schema;
+		this.middlewares = middlewares;
+	}
+	input(schema) {
+		return new ProcedureBuilder(schema, [...this.middlewares]);
+	}
+	use(middleware) {
+		return new ProcedureBuilder(this.schema, [...this.middlewares, middleware]);
+	}
+	query(resolver) {
+		return this.createProcedure("query", resolver);
+	}
+	mutation(resolver) {
+		return this.createProcedure("mutation", resolver);
+	}
+	subscription(resolver) {
+		return this.createProcedure("subscription", resolver);
+	}
+	createProcedure(type, resolver) {
+		const procedure = async (opts) => {
+			let validInput = opts.input;
+			if (this.schema) validInput = await this.schema.parseAsync(opts.input);
+			const callRecursive = async (index, currentCtx) => {
+				if (index >= this.middlewares.length) return resolver({
+					input: validInput,
+					ctx: currentCtx
+				});
+				const middleware = this.middlewares[index];
+				return middleware({
+					input: validInput,
+					ctx: currentCtx,
+					next: ({ ctx }) => callRecursive(index + 1, ctx)
+				});
+			};
+			return callRecursive(0, opts.ctx);
+		};
+		procedure._type = type;
+		procedure._input = null;
+		procedure._output = null;
+		procedure._ctx = null;
+		return procedure;
+	}
+};
+function initIpc() {
+	return {
+		procedure: new ProcedureBuilder(),
+		router(routerObj) {
+			return routerObj;
+		}
+	};
+}
+function bindIpcRouter(ipcMain, router, createContext, path = "") {
+	for (const [key, value] of Object.entries(router)) {
+		const currentPath = path ? `${path}.${key}` : key;
+		if (typeof value === "function" && "_type" in value) {
+			const procedure = value;
+			if (procedure._type === "query" || procedure._type === "mutation") ipcMain.handle(currentPath, async (event, input) => {
+				try {
+					return { data: await procedure({
+						input,
+						ctx: createContext ? await createContext(event) : { event }
+					}) };
+				} catch (error) {
+					return {
+						error: error.message || "Unknown error",
+						code: error.code
+					};
+				}
+			});
+			else if (procedure._type === "subscription") ipcMain.on(currentPath, async (event, input) => {
+				try {
+					await procedure({
+						input,
+						ctx: createContext ? await createContext(event) : { event }
+					});
+				} catch (error) {
+					console.error(`Error in subscription ${currentPath}:`, error);
+				}
+			});
+		} else bindIpcRouter(ipcMain, value, createContext, currentPath);
+	}
+}
+//#endregion
+//#region src/main.ts
+electron.app.setPath("userData", (0, path.join)(os.homedir(), ".electron-ipc-example"));
+var t = initIpc();
+var loggerMiddleware = t.procedure.use(async ({ input, ctx, next }) => {
+	const start = Date.now();
+	console.log(`[IPC] ${ctx.event.senderFrame.url} called with:`, input);
+	const result = await next({ ctx });
+	const duration = Date.now() - start;
+	console.log(`[IPC] Response in ${duration}ms`);
+	return result;
+});
+var systemRouter = t.router({ getInfo: loggerMiddleware.query(() => ({
+	platform: process.platform,
+	arch: process.arch,
+	nodeVersion: process.versions.node,
+	electronVersion: process.versions.electron,
+	chromeVersion: process.versions.chrome
+})) });
+var appRouter = t.router({
+	system: systemRouter,
+	echoReverse: loggerMiddleware.input(zod.z.object({ text: zod.z.string() })).mutation(async ({ input }) => {
+		await new Promise((r) => setTimeout(r, 500));
+		return input.text.split("").reverse().join("");
+	}),
+	throwError: t.procedure.input(zod.z.object({ shouldThrow: zod.z.boolean() })).mutation(() => {
+		throw new Error("This is an expected error thrown from the main process!");
+	})
+});
+function createWindow() {
+	bindIpcRouter(electron.ipcMain, appRouter, (event) => ({
+		event,
+		timestamp: Date.now()
+	}));
+	const win = new electron.BrowserWindow({
+		width: 920,
+		height: 700,
+		minWidth: 700,
+		minHeight: 500,
+		webPreferences: {
+			preload: (0, path.join)(__dirname, "preload.js"),
+			contextIsolation: true,
+			nodeIntegration: false
+		}
+	});
+	if (process.env.VITE_DEV_SERVER_URL) win.loadURL(process.env.VITE_DEV_SERVER_URL);
+	else win.loadFile((0, path.join)(__dirname, "../dist/index.html"));
+}
+electron.app.whenReady().then(createWindow);
+electron.app.on("window-all-closed", () => {
+	if (process.platform !== "darwin") electron.app.quit();
+});
+//#endregion

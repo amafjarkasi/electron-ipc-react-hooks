@@ -159,6 +159,83 @@ export default function App() {
 
 ---
 
+## ⚡ Advanced Features (v1.1)
+
+### 1. Middleware Support
+Implement cross-cutting concerns (logging, auth, performance) using the `.use()` pipeline. Middlewares can intercept inputs, modify context, or block execution.
+
+```typescript
+const t = initIpc();
+
+const loggingMiddleware = t.middleware(async ({ next, path, type }) => {
+  const start = Date.now();
+  const result = await next();
+  console.log(`[IPC] ${path} (${type}) took ${Date.now() - start}ms`);
+  return result;
+});
+
+const protectedProcedure = t.procedure.use(loggingMiddleware);
+
+const appRouter = t.router({
+  getSensitiveData: protectedProcedure.query(() => ({ secret: '42' })),
+});
+```
+
+### 2. Context Injection
+Inject Electron events or authenticated user data into every procedure. Define the context type in `initIpc` and provide a creator function in `bindIpcRouter`.
+
+```typescript
+// main.ts
+type Context = { event: IpcMainInvokeEvent; user?: string };
+const t = initIpc<Context>();
+
+const appRouter = t.router({
+  whoami: t.procedure.query(({ ctx }) => ctx.user || 'Guest'),
+});
+
+bindIpcRouter(ipcMain, appRouter, async (event) => ({
+  event,
+  user: await authenticate(event), // Custom auth logic
+}));
+```
+
+### 3. Nested Sub-Routers
+Organize large API surfaces into logical namespaces. The framework handles recursive path resolution automatically.
+
+```typescript
+const systemRouter = t.router({
+  getInfo: t.procedure.query(() => ({ platform: process.platform })),
+});
+
+const appRouter = t.router({
+  system: systemRouter, // Nested at .system.getInfo
+  echo: t.procedure.input(z.string()).query(({ input }) => input),
+});
+```
+
+### 4. Structured Error Handling (`IpcError`)
+Throw structured errors in the Main process and catch them natively in React with `code` and `data` metadata.
+
+```typescript
+// main.ts
+import { IpcError } from 'electron-ipc-react-hooks';
+
+const appRouter = t.router({
+  danger: t.procedure.query(() => {
+    throw new IpcError('Unauthorized access', 'UNAUTHORIZED', { reason: 'Invalid token' });
+  }),
+});
+
+// renderer.ts (React)
+const { error } = ipc.danger.useQuery();
+if (error instanceof IpcError) {
+  console.log(error.code); // 'UNAUTHORIZED'
+  console.log(error.data); // { reason: 'Invalid token' }
+}
+```
+
+---
+
 ## ⚡ Handling Real-Time Streams (Subscriptions)
 
 One critical pain point with Electron IPC is subscribing bidirectional streams or Main-driven continuous events without writing tedious `ipcRenderer.on` triggers mixed with messy `useEffect` cleanup procedures.

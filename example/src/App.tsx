@@ -5,7 +5,7 @@ import './index.css'
 function App() {
   const [inputText, setInputText] = useState('')
 
-  const { data: sysInfo, isLoading: sysLoading } = ipc.getSystemInfo.useQuery(undefined)
+  const { data: sysInfo, isLoading: sysLoading } = ipc.system.getInfo.useQuery(undefined)
   const echoMutation = ipc.echoReverse.useMutation()
   const errorMutation = ipc.throwError.useMutation()
 
