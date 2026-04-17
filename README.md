@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="./.github/assets/hero.png" alt="electron-ipc-react-hooks hero graphic" width="100%">
+  <img src="./.github/assets/hero-v2.png" alt="electron-ipc-react-hooks hero graphic" width="100%">
 
   <br />
   <br />
