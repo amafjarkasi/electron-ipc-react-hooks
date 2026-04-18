@@ -1,6 +1,39 @@
 import { expect, test, vi } from 'vitest';
-import { initIpc, bindIpcRouter, IpcError } from './main';
+import { initIpc, bindIpcRouter, IpcError, createIpcStore, bindIpcStore } from './main';
 import { z } from 'zod';
+
+test('createIpcStore synchronizes state', async () => {
+  const store = createIpcStore({ theme: 'dark', volume: 50 });
+  expect(store.get().theme).toBe('dark');
+  
+  store.set({ theme: 'light' });
+  expect(store.get().theme).toBe('light');
+
+  const mockIpcMain = {
+    handle: vi.fn(),
+    on: vi.fn()
+  } as any;
+
+  let broadcastedState = null;
+  const mockWebContents = {
+    getAllWebContents: () => [
+      { send: (channel: string, payload: any) => { if (channel === '__ipc_store_settings_update') broadcastedState = payload; } }
+    ]
+  };
+
+  bindIpcStore(mockIpcMain, 'settings', store, { webContents: mockWebContents as any });
+  
+  const getHandler = mockIpcMain.handle.mock.calls.find((c: any) => c[0] === '__ipc_store_settings_get')[1];
+  const setHandler = mockIpcMain.handle.mock.calls.find((c: any) => c[0] === '__ipc_store_settings_set')[1];
+  
+  const resGet = await getHandler({} as any);
+  expect(resGet).toEqual({ theme: 'light', volume: 50 });
+
+  const resSet = await setHandler({} as any, { volume: 100 });
+  expect(resSet).toEqual({ theme: 'light', volume: 100 });
+  expect(store.get().volume).toBe(100);
+  expect(broadcastedState).toEqual({ theme: 'light', volume: 100 });
+});
 
 test('middleware flow and context injection', async () => {
   const t = initIpc<{ user: string; role?: string }>();
@@ -20,7 +53,7 @@ test('middleware flow and context injection', async () => {
   });
 
   // Test internal execution
-  const res = await appRouter.ping({ input: undefined, ctx: { user: 'john' }, path: 'ping' });
+  const res = await appRouter.ping({ input: undefined, ctx: { user: 'john' }, path: 'ping', broadcast: { invalidate: () => {} } });
   expect(res).toBe('pong_john_verified_admin');
 });
 
@@ -66,10 +99,10 @@ test('zod validation in Version 1.1', async () => {
       .query(({ input }) => input.a + input.b)
   });
 
-  const res = await appRouter.sum({ input: { a: 10, b: 5 }, ctx: {} as any, path: 'sum' });
+  const res = await appRouter.sum({ input: { a: 10, b: 5 }, ctx: {} as any, path: 'sum', broadcast: { invalidate: () => {} } });
   expect(res).toBe(15);
 
-  await expect(appRouter.sum({ input: { a: '10' } as any, ctx: {} as any, path: 'sum' })).rejects.toThrow();
+  await expect(appRouter.sum({ input: { a: '10' } as any, ctx: {} as any, path: 'sum', broadcast: { invalidate: () => {} } })).rejects.toThrow();
 });
 
 test('IpcError serialization', async () => {
@@ -96,3 +129,113 @@ test('IpcError serialization', async () => {
     data: { reason: 'bad token' }
   });
 });
+
+test('AbortSignal cancellation', async () => {
+  const t = initIpc();
+  
+  let wasAborted = false;
+  
+  const appRouter = t.router({
+    slowThing: t.procedure.query(async ({ signal }) => {
+      // Simulate waiting for something, checking signal
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      if (signal?.aborted) {
+        wasAborted = true;
+        throw new Error('Aborted');
+      }
+      return 'done';
+    })
+  });
+
+  const mockIpcMain = {
+    handle: vi.fn(),
+    on: vi.fn()
+  } as any;
+
+  bindIpcRouter(mockIpcMain, appRouter);
+  
+  const slowHandler = mockIpcMain.handle.mock.calls.find((c: any) => c[0] === 'slowThing')[1];
+  const abortHandler = mockIpcMain.on.mock.calls.find((c: any) => c[0] === 'slowThing.abort')[1];
+  
+  const invokeId = 'test-invoke-123';
+  
+  // Start the handler
+  const promise = slowHandler({} as any, undefined, invokeId);
+  
+  // Trigger abort before the promise resolves
+  abortHandler({} as any, invokeId);
+  
+  const res = await promise;
+  
+  expect(wasAborted).toBe(true);
+  expect(res).toEqual({
+    error: 'Aborted'
+  });
+});
+
+test('Pub/Sub Cross-Window Broadcast Invalidation', async () => {
+  const t = initIpc();
+  
+  const appRouter = t.router({
+    updateSettings: t.procedure.mutation(({ broadcast }) => {
+      broadcast.invalidate('getSettings');
+      return true;
+    })
+  });
+
+  const mockIpcMain = {
+    handle: vi.fn(),
+    on: vi.fn()
+  } as any;
+
+  let broadcastedPayload = null;
+  const mockWebContents = {
+    getAllWebContents: () => [
+      { send: (channel: string, payload: any) => { if (channel === '__ipc_invalidate') broadcastedPayload = payload; } }
+    ]
+  };
+
+  // We pass mockWebContents as an option so we don't need a real Electron environment in Vitest
+  bindIpcRouter(mockIpcMain, appRouter, undefined, { webContents: mockWebContents as any });
+  
+  const updateHandler = mockIpcMain.handle.mock.calls.find((c: any) => c[0] === 'updateSettings')[1];
+  
+  const res = await updateHandler({} as any, undefined, 'invoke-2');
+  
+  expect(res).toEqual({ data: true });
+  expect(broadcastedPayload).toBe('getSettings');
+});
+
+test('batch IPC requests', async () => {
+  const t = initIpc();
+  
+  const appRouter = t.router({
+    getA: t.procedure.query(() => 'A'),
+    getB: t.procedure.input(z.string()).query(({ input }) => `B-${input}`)
+  });
+
+  const mockIpcMain = {
+    handle: vi.fn(),
+    on: vi.fn(),
+    removeHandler: vi.fn()
+  } as any;
+
+  bindIpcRouter(mockIpcMain, appRouter);
+  
+  const batchHandler = mockIpcMain.handle.mock.calls.find((c: any) => c[0] === '__ipc_batch')[1];
+  
+  const requests = [
+    { channel: 'getA', input: undefined, invokeId: '1' },
+    { channel: 'getB', input: 'test', invokeId: '2' },
+    { channel: 'missing', input: null, invokeId: '3' }
+  ];
+  
+  const res = await batchHandler({} as any, requests);
+  
+  expect(res).toEqual([
+    { data: 'A' },
+    { data: 'B-test' },
+    { error: 'Procedure missing not found' }
+  ]);
+});
+

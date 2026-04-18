@@ -1,1 +1,1 @@
-let e=require(`electron`);function t(e,t,n=`electronIpc`){e.exposeInMainWorld(n,{invoke:(e,n)=>t.invoke(e,n),on:(e,n)=>{t.on(e,n)},off:(e,n)=>{t.off(e,n)}})}t(e.contextBridge,e.ipcRenderer),e.contextBridge.exposeInMainWorld(`env`,{mode:process.env.NODE_ENV});
+let e=require(`electron`);function t(e,t,n=`electronIpc`){e.exposeInMainWorld(n,{invoke:(e,n,r)=>t.invoke(e,n,r),send:(e,n)=>t.send(e,n),on:(e,n)=>{t.on(e,n)},off:(e,n)=>{t.off(e,n)}})}t(e.contextBridge,e.ipcRenderer),e.contextBridge.exposeInMainWorld(`env`,{mode:process.env.NODE_ENV});

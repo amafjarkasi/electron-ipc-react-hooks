@@ -221,24 +221,84 @@ const appRouter = t.router({
 });
 ```
 
-### 4. Structured Error Handling (`IpcError`)
-Throw structured errors in the Main process and catch them natively in React with `code` and `data` metadata.
+### 4. Structured Error Handling (`IpcError` & `ZodError`)
+Throw structured errors in the Main process and catch them natively in React with `code` and `data` metadata. Any failed Zod validation automatically surfaces as a structured `BAD_REQUEST` error containing the validation issues.
 
 ```typescript
 // main.ts
 import { IpcError } from 'electron-ipc-react-hooks';
 
 const appRouter = t.router({
-  danger: t.procedure.query(() => {
-    throw new IpcError('Unauthorized access', 'UNAUTHORIZED', { reason: 'Invalid token' });
-  }),
+  saveProfile: t.procedure
+    .input(z.object({ name: z.string().min(3) }))
+    .mutation(({ input }) => {
+      if (input.name === 'admin') {
+        throw new IpcError('Reserved username', 'FORBIDDEN', { reason: 'restricted_word' });
+      }
+      return { success: true };
+    }),
 });
 
 // renderer.ts (React)
-const { error } = ipc.danger.useQuery();
-if (error instanceof IpcError) {
-  console.log(error.code); // 'UNAUTHORIZED'
-  console.log(error.data); // { reason: 'Invalid token' }
+const mutation = ipc.saveProfile.useMutation();
+
+// If the Zod validation fails (e.g. name is 2 characters):
+// mutation.error.code === 'BAD_REQUEST'
+// mutation.error.data === [{ code: 'too_small', minimum: 3, ... }]
+
+// If the IpcError is thrown:
+// mutation.error.code === 'FORBIDDEN'
+// mutation.error.data === { reason: 'restricted_word' }
+```
+
+### 5. Auto-Canceling IPC Queries (`AbortSignal`)
+When a React component unmounts or a query is manually canceled via React Query, `electron-ipc-react-hooks` automatically forwards an abort signal across the IPC bridge. This injects an `AbortSignal` into your procedure context, allowing you to elegantly halt long-running database queries, expensive file reads, or HTTP requests on the main process to conserve resources!
+
+```typescript
+// main.ts
+const appRouter = t.router({
+  heavyTask: t.procedure
+    .input(z.string())
+    .query(async ({ input, signal }) => {
+      for (let i = 0; i < 50; i++) {
+        // Halt if the user navigated away from the React component!
+        if (signal?.aborted) throw new Error('Task aborted early');
+        await new Promise(r => setTimeout(r, 100)); 
+      }
+      return `Completed task: ${input}`;
+    }),
+});
+```
+
+### 6. Cross-Window State Sync (Pub/Sub Invalidation)
+Electron apps often struggle to keep state synchronized across multiple open windows (e.g., mutating settings in a Preferences window and reflecting those changes in a Main window). `electron-ipc-react-hooks` provides a built-in `broadcast` object to automatically invalidate and refetch React Queries globally!
+
+```typescript
+// main.ts
+const appRouter = t.router({
+  updateTheme: t.procedure
+    .input(z.string())
+    .mutation(async ({ input, broadcast }) => {
+      await saveThemeToDisk(input);
+      // Immediately invalidates the 'getTheme' query across EVERY open Electron window!
+      broadcast.invalidate('getTheme');
+    }),
+});
+```
+
+To enable this on the frontend, simply mount the `useIpcInvalidator` hook near the root of your React application:
+
+```tsx
+// App.tsx
+import { useQueryClient } from '@tanstack/react-query';
+import { useIpcInvalidator } from 'electron-ipc-react-hooks/renderer';
+
+export default function App() {
+  const queryClient = useQueryClient();
+  // Automatically listens for 'broadcast.invalidate' messages and triggers TanStack Query!
+  useIpcInvalidator(queryClient);
+
+  return <MyComponents />;
 }
 ```
 
@@ -248,20 +308,170 @@ if (error instanceof IpcError) {
 
 One critical pain point with Electron IPC is subscribing bidirectional streams or Main-driven continuous events without writing tedious `ipcRenderer.on` triggers mixed with messy `useEffect` cleanup procedures.
 
-With `electron-ipc-react-hooks`, you can natively subscribe directly inside your Main process router via the framework. E.g.: Downloading a file to disk and displaying the progress inside React instantly.
+With `electron-ipc-react-hooks`, you can natively subscribe directly inside your Main process router via the framework. Simply return a cleanup function from your procedure to prevent memory leaks across the Javascript event loops.
 
 ```typescript
 // main.ts
 const appRouter = t.router({
   onDownloadProgress: t.procedure
-    .subscription(async ({ emit }) => {
+    .subscription(({ emit }) => {
         // Assume NativeDownloadHandler is some Node script piping out data chunks
-        NativeDownloadHandler.on('progress', (pct) => emit(pct));
+        const handler = (pct) => emit(pct);
+        NativeDownloadHandler.on('progress', handler);
+
+        // Return a cleanup function! When the React component unmounts,
+        // this function automatically triggers to stop memory leaks.
+        return () => {
+           NativeDownloadHandler.off('progress', handler);
+        };
     })
 })
 ```
 
+Then, easily consume the stream on the frontend using the generated `useSubscription` hook. It handles IPC setup and teardown automatically when the component mounts and unmounts!
+
+```tsx
+// App.tsx
+function DownloadTracker() {
+  const [progress, setProgress] = useState(0);
+
+  ipc.onDownloadProgress.useSubscription(undefined, {
+    onData: (pct) => setProgress(pct),
+  });
+
+  return <div>Download Progress: {progress}%</div>;
+}
+```
+
 React Query's robust background mechanisms guarantee memory leaks across the Javascript event loops are contained and removed effectively!
+
+---
+
+## 🌐 Shared Reactive State (`createIpcStore`)
+
+Need to synchronize a global state object (like user settings or a theme) between your Main process and *every* open Electron Renderer window? `createIpcStore` creates a fully reactive store that automatically broadcasts changes everywhere.
+
+```typescript
+// main.ts
+import { createIpcStore, bindIpcStore } from 'electron-ipc-react-hooks/main';
+
+// 1. Create the store
+export const settingsStore = createIpcStore({ theme: 'system', volume: 50 });
+
+// 2. Bind it to IPC (pass webContents to enable broadcasting to all windows)
+app.whenReady().then(() => {
+  const win = new BrowserWindow({ ... });
+  bindIpcStore(ipcMain, 'settings', settingsStore, { webContents: win.webContents });
+});
+```
+
+```tsx
+// ipc.ts (Renderer)
+import { createReactIpcStore } from 'electron-ipc-react-hooks/renderer';
+// Generate our type-safe React global store hook!
+export const useSettingsStore = createReactIpcStore('settings', { theme: 'system', volume: 50 });
+
+// App.tsx
+function SettingsPanel() {
+  const [settings, setSettings] = useSettingsStore();
+
+  return (
+    <div>
+      <p>Current Theme: {settings.theme}</p>
+      <button onClick={() => setSettings({ theme: 'dark' })}>Set Dark Mode</button>
+    </div>
+  );
+}
+```
+
+Whenever any window calls `setSettings()`, the state is updated on the Main process, and the new state is instantly broadcasted to all other React windows!
+
+---
+
+## 📡 Bi-directional Data Streams (`.channel()`)
+
+While `.subscription()` is great for Main-to-Renderer streams, `.channel()` allows the Renderer to continuously stream chunks of data *up* to the Main process while receiving responses back. Perfect for uploading large files without locking the IPC bridge.
+
+```typescript
+// main.ts
+const appRouter = t.router({
+  fileUpload: t.procedure
+    .input(z.object({ filename: z.string() }))
+    .channel(async ({ input, onData, emit }) => {
+      let totalBytes = 0;
+      
+      // Listen for chunks from the Renderer
+      onData((chunk) => {
+        if (chunk.done) {
+          emit({ status: 'complete', totalBytes });
+          return;
+        }
+        totalBytes += chunk.bytes;
+        emit({ status: 'receiving', bytesReceived: totalBytes });
+      });
+
+      return () => console.log('Client disconnected!');
+    })
+});
+
+// App.tsx
+function Uploader() {
+  const { send } = ipc.fileUpload.useChannel(
+    { filename: 'data.zip' },
+    {
+      onData: (response) => console.log('Main process says:', response)
+    }
+  );
+
+  return (
+    <button onClick={() => {
+      send({ bytes: 1024 }); // Send a chunk
+      send({ done: true });  // Finish stream
+    }}>
+      Start Upload
+    </button>
+  );
+}
+```
+
+---
+
+## 📜 Infinite Query Pagination
+
+Seamlessly paginate over large local datasets (like reading a huge file or querying an SQLite database) using the generated `useInfiniteQuery` hook. `electron-ipc-react-hooks` handles forwarding the `pageParam` as the `cursor` to your Main process.
+
+```typescript
+// main.ts
+const appRouter = t.router({
+  getLogs: t.procedure
+    .input(z.object({ cursor: z.number().optional(), limit: z.number() }))
+    .query(async ({ input }) => {
+      const logs = await localDatabase.getLogs(input.cursor || 0, input.limit);
+      return {
+        items: logs,
+        nextCursor: logs.length === input.limit ? (input.cursor || 0) + input.limit : undefined,
+      };
+    }),
+});
+
+// React
+function LogsViewer() {
+  const { data, fetchNextPage, hasNextPage } = ipc.getLogs.useInfiniteQuery(
+    { limit: 50 },
+    {
+      getNextPageParam: (lastPage) => lastPage.nextCursor,
+      initialPageParam: 0,
+    }
+  );
+  
+  return (
+    <div>
+      {data?.pages.map((page) => page.items.map(log => <div key={log.id}>{log.message}</div>))}
+      <button onClick={() => fetchNextPage()} disabled={!hasNextPage}>Load More</button>
+    </div>
+  );
+}
+```
 
 ---
 
@@ -367,6 +577,16 @@ app.setPath('userData', join(os.homedir(), '.your-app-name'))
 
 app.whenReady().then(() => { /* ... */ })
 ```
+
+---
+
+## 🗺️ Roadmap & Upcoming Features
+
+We are constantly exploring new ways to push the boundaries of Electron IPC. Some features currently under consideration:
+
+- **Shared State Synchronization**: APIs to maintain a global reactive state object that seamlessly syncs between the Main process and all active Renderer windows.
+- **Request Batching**: Grouping multiple IPC queries executed in the same React render cycle into a single batched IPC message to minimize bridge overhead.
+- **UI Form Generation**: Utility hooks to automatically generate fully typed UI forms in React directly from the backend Zod schemas.
 
 ---
 
