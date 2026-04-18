@@ -18,6 +18,7 @@ function App() {
   const echoMutation = ipc.echoReverse.useMutation()
   const errorMutation = ipc.throwError.useMutation()
   const saveProfileMutation = ipc.saveProfile.useMutation()
+  const openWindowMutation = ipc.system.openNewWindow.useMutation()
 
   ipc.clock.useSubscription(undefined, {
     onData: (data: string) => {
@@ -118,6 +119,22 @@ function App() {
                 {helloMsg}
               </div>
             )}
+
+            <div className="card-header" style={{ marginTop: '20px' }}>
+              <div className="card-icon blue">🪟</div>
+              <h2>Multi-Window Sync</h2>
+            </div>
+            <p className="subtitle">
+              Open a new window to watch the Shared Reactive Store sync in real-time!
+            </p>
+            <div style={{ marginTop: '10px' }}>
+               <button 
+                 onClick={() => openWindowMutation.mutate(undefined)}
+                 disabled={openWindowMutation.isPending}
+               >
+                 {openWindowMutation.isPending ? 'Opening...' : 'Open New Window'}
+               </button>
+            </div>
           </div>
 
           {/* File Picker Demo */}

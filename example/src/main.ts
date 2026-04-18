@@ -65,6 +65,11 @@ const systemRouter = t.router({
       size: stats.size,
       created: stats.birthtime.toISOString()
     };
+  }),
+
+  openNewWindow: protectedProcedure.mutation(() => {
+    createWindow();
+    return true;
   })
 })
 
@@ -188,13 +193,6 @@ const appRouter = t.router({
 export type AppRouter = typeof appRouter
 
 function createWindow() {
-  // Bind IPC router with context injection
-  bindIpcRouter(
-    ipcMain, 
-    appRouter, 
-    (event) => ({ event, timestamp: Date.now() })
-  )
-
   const win = new BrowserWindow({
     width: 920,
     height: 700,
@@ -208,9 +206,6 @@ function createWindow() {
     }
   })
 
-  // Bind store with access to WebContents to broadcast state updates
-  bindIpcStore(ipcMain, 'settings', settingsStore, { webContents: win.webContents })
-
   if (process.env.VITE_DEV_SERVER_URL) {
     win.loadURL(process.env.VITE_DEV_SERVER_URL)
   } else {
@@ -218,7 +213,19 @@ function createWindow() {
   }
 }
 
-app.whenReady().then(createWindow)
+app.whenReady().then(() => {
+  // Bind IPC router with context injection
+  bindIpcRouter(
+    ipcMain, 
+    appRouter, 
+    (event) => ({ event, timestamp: Date.now() })
+  )
+
+  // Bind store to broadcast state updates to all WebContents natively
+  bindIpcStore(ipcMain, 'settings', settingsStore)
+
+  createWindow()
+})
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit()
