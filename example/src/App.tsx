@@ -8,7 +8,7 @@ function App() {
   const [inputText, setInputText] = useState('')
   const [clockData, setClockData] = useState<string>('Waiting for clock...')
   
-  const [settings, setSettings] = useSettingsStore();
+  const [settings, setSettings, resetSettings] = useSettingsStore();
 
   const queryClient = useQueryClient()
   useIpcInvalidator(queryClient)
@@ -79,6 +79,10 @@ function App() {
                <button onClick={() => setSettings({ notifications: !settings.notifications })}>
                  Toggle Notifications
                </button>
+               
+               <button onClick={() => resetSettings()} className="danger" style={{ marginLeft: 'auto' }}>
+                 Reset Defaults
+               </button>
             </div>
           </div>
 
@@ -114,6 +118,18 @@ function App() {
                 {helloMsg}
               </div>
             )}
+          </div>
+
+          {/* File Picker Demo */}
+          <div className="card">
+            <div className="card-header">
+              <div className="card-icon blue">📁</div>
+              <h2>Native Dialogs & FS</h2>
+            </div>
+            <p className="subtitle">
+              Trigger a native open-file dialog on the Main Process and return the file's stats via IPC.
+            </p>
+            <FilePickerDemo />
           </div>
 
           {/* Clock Subscription */}
@@ -275,6 +291,32 @@ function App() {
 
         </div>
       </div>
+    </div>
+  )
+}
+
+function FilePickerDemo() {
+  const pickFile = ipc.system.openFileDialog.useMutation();
+
+  return (
+    <div style={{ marginTop: '15px' }}>
+      <button 
+        onClick={() => pickFile.mutate(undefined)} 
+        disabled={pickFile.isPending}
+      >
+        {pickFile.isPending ? 'Opening...' : 'Select a File'}
+      </button>
+
+      {pickFile.data && (
+        <div className="result-block" style={{ marginTop: '10px' }}>
+          <div className="result-label">File Stats</div>
+          <div style={{ fontSize: '0.9em', wordBreak: 'break-all' }}>
+            <strong>Name:</strong> {pickFile.data.name}<br/>
+            <strong>Size:</strong> {(pickFile.data.size / 1024).toFixed(2)} KB<br/>
+            <strong>Path:</strong> {pickFile.data.path}
+          </div>
+        </div>
+      )}
     </div>
   )
 }

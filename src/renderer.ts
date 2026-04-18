@@ -13,7 +13,7 @@ export class IpcError extends Error {
 }
 
 export function createReactIpcStore<T>(storeName: string, initialState: T, apiKey = 'electronIpc') {
-  return function useIpcStore(): [T, (updates: Partial<T> | ((prev: T) => Partial<T>)) => void] {
+  return function useIpcStore(): [T, (updates: Partial<T> | ((prev: T) => Partial<T>)) => void, () => void] {
     const api = (window as any)[apiKey];
     const [state, setState] = useState<T>(initialState);
 
@@ -47,7 +47,14 @@ export function createReactIpcStore<T>(storeName: string, initialState: T, apiKe
       });
     }, []);
 
-    return [state, updateState];
+    const resetState = useCallback(() => {
+      if (!api) return;
+      api.invoke(`__ipc_store_${storeName}_reset`).then((s: T) => {
+        if (s) setState(s);
+      });
+    }, []);
+
+    return [state, updateState, resetState];
   };
 }
 

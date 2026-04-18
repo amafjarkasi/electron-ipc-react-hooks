@@ -9,6 +9,10 @@ test('createIpcStore synchronizes state', async () => {
   store.set({ theme: 'light' });
   expect(store.get().theme).toBe('light');
 
+  store.reset();
+  expect(store.get().theme).toBe('dark');
+  expect(store.get().volume).toBe(50);
+
   const mockIpcMain = {
     handle: vi.fn(),
     on: vi.fn()
@@ -25,14 +29,19 @@ test('createIpcStore synchronizes state', async () => {
   
   const getHandler = mockIpcMain.handle.mock.calls.find((c: any) => c[0] === '__ipc_store_settings_get')[1];
   const setHandler = mockIpcMain.handle.mock.calls.find((c: any) => c[0] === '__ipc_store_settings_set')[1];
+  const resetHandler = mockIpcMain.handle.mock.calls.find((c: any) => c[0] === '__ipc_store_settings_reset')[1];
   
   const resGet = await getHandler({} as any);
-  expect(resGet).toEqual({ theme: 'light', volume: 50 });
+  expect(resGet).toEqual({ theme: 'dark', volume: 50 });
 
   const resSet = await setHandler({} as any, { volume: 100 });
-  expect(resSet).toEqual({ theme: 'light', volume: 100 });
+  expect(resSet).toEqual({ theme: 'dark', volume: 100 });
   expect(store.get().volume).toBe(100);
-  expect(broadcastedState).toEqual({ theme: 'light', volume: 100 });
+  expect(broadcastedState).toEqual({ theme: 'dark', volume: 100 });
+
+  const resReset = await resetHandler({} as any);
+  expect(resReset).toEqual({ theme: 'dark', volume: 50 });
+  expect(store.get().volume).toBe(50);
 });
 
 test('middleware flow and context injection', async () => {

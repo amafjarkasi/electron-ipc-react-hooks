@@ -133,6 +133,10 @@ export function createIpcStore<T extends Record<string, any>>(initialState: T) {
       state = { ...state, ...updates };
       subscribers.forEach(sub => sub(state));
     },
+    reset: () => {
+      state = { ...initialState };
+      subscribers.forEach(sub => sub(state));
+    },
     subscribe: (callback: (state: T) => void) => {
       subscribers.add(callback);
       return () => subscribers.delete(callback);
@@ -168,6 +172,11 @@ export function bindIpcStore<T extends Record<string, any>>(
   
   ipcMain.handle(`__ipc_store_${storeName}_set`, (_event, updates: Partial<T>) => {
     store.set(updates);
+    return store.get();
+  });
+
+  ipcMain.handle(`__ipc_store_${storeName}_reset`, () => {
+    store.reset();
     return store.get();
   });
 }

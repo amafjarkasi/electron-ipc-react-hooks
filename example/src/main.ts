@@ -1,6 +1,7 @@
-import { app, BrowserWindow, ipcMain } from 'electron'
-import { join } from 'path'
+import { app, BrowserWindow, ipcMain, dialog } from 'electron'
+import { join, basename } from 'path'
 import * as os from 'os'
+import * as fs from 'fs/promises'
 import { initIpc, bindIpcRouter, IpcError, createIpcStore, bindIpcStore } from 'electron-ipc-react-hooks/main'
 import { z } from 'zod'
 
@@ -40,7 +41,31 @@ const systemRouter = t.router({
     nodeVersion: process.versions.node,
     electronVersion: process.versions.electron,
     chromeVersion: process.versions.chrome,
-  }))
+  })),
+
+  openFileDialog: protectedProcedure.mutation(async ({ ctx }) => {
+    const window = BrowserWindow.fromWebContents(ctx.event.sender);
+    if (!window) throw new IpcError('No window found', 'NOT_FOUND');
+
+    const result = await dialog.showOpenDialog(window, {
+      properties: ['openFile'],
+      filters: [{ name: 'All Files', extensions: ['*'] }]
+    });
+
+    if (result.canceled || result.filePaths.length === 0) {
+      return null;
+    }
+
+    const filePath = result.filePaths[0];
+    const stats = await fs.stat(filePath);
+
+    return {
+      path: filePath,
+      name: basename(filePath),
+      size: stats.size,
+      created: stats.birthtime.toISOString()
+    };
+  })
 })
 
 // 4. Define the main App Router with nesting

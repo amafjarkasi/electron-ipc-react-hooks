@@ -508,6 +508,8 @@ npx electron .
 
 The example features:
 - **System Context** — a `useQuery` that fetches real `process.platform`, Electron version, Node version, etc. from the main process
+- **Native Dialogs** — a `useMutation` showcasing full access to the Node backend to trigger a system file picker and read file stats
+- **Global Reactive Store** — multiple windows synchronizing themes and settings with native IPC broadcasts and one-click resets
 - **IPC Mutation** — a `useMutation` that sends text to the main process, waits 500ms, and returns the reversed string (proving async round-trip works)
 - **Error Boundaries** — a mutation that intentionally throws inside the main process and surfaces the error cleanly through React Query's `error` state, with no uncaught promise rejections
 
