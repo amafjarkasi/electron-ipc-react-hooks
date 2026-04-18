@@ -1,9 +1,40 @@
 {
   "name": "electron-ipc-react-hooks",
-  "version": "1.0.0",
+  "version": "1.2.1",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
+  "description": "Type-safe IPC for Electron with React hooks — tRPC-style API for main/renderer communication",
+  "license": "MIT",
+  "author": "",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/amafjarkasi/electron-ipc-react-hooks.git"
+  },
+  "keywords": [
+    "electron",
+    "ipc",
+    "react",
+    "hooks",
+    "react-query",
+    "tanstack",
+    "trpc",
+    "typescript",
+    "preload",
+    "context-bridge"
+  ],
+  "files": [
+    "dist/errors.*",
+    "dist/types.*",
+    "dist/main.*",
+    "dist/preload.*",
+    "dist/renderer.*",
+    "dist/rateLimiter.*",
+    "dist/devtools.*",
+    "dist/index.*",
+    ".github/assets/*",
+    "README.md"
+  ],
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
@@ -24,12 +55,9 @@
   },
   "scripts": {
     "build": "tsc",
-    "test": "vitest run"
+    "test": "vitest run",
+    "prepublishOnly": "npm run build"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
-  "description": "",
   "peerDependencies": {
     "@tanstack/react-query": ">=5.0.0",
     "react": ">=18.0.0",

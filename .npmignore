@@ -1,0 +1,28 @@
+# Source files
+src/
+example/
+tsconfig.json
+vitest.config.ts
+
+# Test files
+**/*.test.ts
+**/*.test.js
+**/*.test.d.ts
+
+# Build artifacts
+*.tsbuildinfo
+*.map
+dist/src/
+
+# Development files
+.git/
+.gitignore
+node_modules/
+.vscode/
+.idea/
+.cache/
+.env*
+*.log
+coverage/
+.nyc_output/
+html/

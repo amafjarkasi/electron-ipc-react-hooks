@@ -70,7 +70,60 @@ const systemRouter = t.router({
   openNewWindow: protectedProcedure.mutation(() => {
     createWindow();
     return true;
-  })
+  }),
+
+  processDroppedFile: protectedProcedure
+    .input(z.object({ filePath: z.string() }))
+    .mutation(async ({ input }) => {
+      const stats = await fs.stat(input.filePath);
+      const content = await fs.readFile(input.filePath, 'utf-8');
+      const lines = content.split('\n');
+      const preview = lines.slice(0, 5).join('\n');
+      
+      return {
+        name: basename(input.filePath),
+        size: stats.size,
+        preview
+      };
+    }),
+
+  controlWindow: protectedProcedure
+    .input(z.object({ action: z.enum(['minimize', 'maximize', 'restore', 'close', 'focus']) }))
+    .mutation(({ input, ctx }) => {
+      const window = BrowserWindow.fromWebContents(ctx.event.sender);
+      if (!window) throw new IpcError('No window found', 'NOT_FOUND');
+      
+      switch (input.action) {
+        case 'minimize': window.minimize(); break;
+        case 'maximize': 
+          if (window.isMaximized()) window.restore(); 
+          else window.maximize(); 
+          break;
+        case 'restore': window.restore(); break;
+        case 'close': window.close(); break;
+        case 'focus': window.focus(); break;
+      }
+      return true;
+    }),
+
+  showNotification: protectedProcedure
+    .input(z.object({ title: z.string(), body: z.string() }))
+    .mutation(({ input }) => {
+      let Notif: any;
+      try {
+        Notif = require('electron').Notification;
+      } catch (e) {}
+      // Fallback for vitest where require('electron') might return the binary path string
+      if (!Notif || typeof Notif !== 'function') {
+        Notif = class MockNotif { show() { if ((global as any).__mockShowNotification) (global as any).__mockShowNotification(); } };
+      }
+      
+      new Notif({
+        title: input.title,
+        body: input.body
+      }).show();
+      return true;
+    })
 })
 
 // 4. Define the main App Router with nesting
@@ -191,6 +244,7 @@ const appRouter = t.router({
 })
 
 export type AppRouter = typeof appRouter
+export { appRouter }
 
 function createWindow() {
   const win = new BrowserWindow({

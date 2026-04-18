@@ -1,40 +1,14 @@
 import type { ZodType } from "zod";
 import type { IpcMain, IpcMainInvokeEvent } from "electron";
+import { IpcError } from './errors';
+import type { ProcedureType, AnyProcedure, AnyRouter, Middleware } from './types';
 
-export class IpcError extends Error {
-  constructor(
-    public message: string,
-    public code: string = 'INTERNAL_SERVER_ERROR',
-    public data?: any
-  ) {
-    super(message);
-    this.name = 'IpcError';
-  }
-}
+export { IpcError } from './errors';
+export type { ProcedureType, AnyProcedure, AnyRouter, Middleware } from './types';
 
-type ProcedureType = 'query' | 'mutation' | 'subscription' | 'channel';
-
-export interface Procedure<TInput, TOutput, TType extends ProcedureType, TContext> {
-  _type: TType;
-  _input: TInput;
-  _output: TOutput;
-  _ctx: TContext;
-  (opts: { input: TInput; ctx: TContext; path: string; emit?: (data: TOutput) => void; onData?: (listener: (data: any) => void) => void; signal?: AbortSignal; broadcast: { invalidate: (path: string) => void } }): Promise<any>;
-}
-
-export type AnyProcedure = Procedure<any, any, any, any>;
-export type AnyRouter = { [key: string]: AnyProcedure | AnyRouter };
-
-export type Middleware<TInput, TContext, TNewContext> = (opts: {
-  input: TInput;
-  ctx: TContext;
-  path: string;
-  type: ProcedureType;
-  signal?: AbortSignal;
-  broadcast: { invalidate: (path: string) => void };
-  next: (opts?: { ctx: TNewContext }) => Promise<any>;
-}) => Promise<any>;
-
+/**
+ * Builder for creating type-safe IPC procedures with input validation and middleware support.
+ */
 export class ProcedureBuilder<TInput = void, TContext = any> {
   private schema?: ZodType<any>;
   private middlewares: Middleware<any, any, any>[] = [];
@@ -44,34 +18,40 @@ export class ProcedureBuilder<TInput = void, TContext = any> {
     this.middlewares = middlewares;
   }
 
+  /** Define the input schema for the procedure using a Zod type. */
   input<TNewInput>(schema: ZodType<TNewInput>): ProcedureBuilder<TNewInput, TContext> {
     return new ProcedureBuilder<TNewInput, TContext>(schema, [...this.middlewares]);
   }
 
+  /** Attach middleware to the procedure chain. */
   use<TNewContext>(middleware: Middleware<TInput, TContext, TNewContext>): ProcedureBuilder<TInput, TNewContext> {
     return new ProcedureBuilder<TInput, TNewContext>(this.schema, [...this.middlewares, middleware]);
   }
 
-  query<TOutput>(resolver: (opts: { input: TInput; ctx: TContext; signal?: AbortSignal; broadcast: { invalidate: (path: string) => void } }) => Promise<TOutput> | TOutput): Procedure<TInput, TOutput, 'query', TContext> {
+  /** Define a read-only query procedure. */
+  query<TOutput>(resolver: (opts: { input: TInput; ctx: TContext; signal?: AbortSignal; broadcast: { invalidate: (path: string) => void } }) => Promise<TOutput> | TOutput): AnyProcedure {
     return this.createProcedure('query', resolver);
   }
 
-  mutation<TOutput>(resolver: (opts: { input: TInput; ctx: TContext; signal?: AbortSignal; broadcast: { invalidate: (path: string) => void } }) => Promise<TOutput> | TOutput): Procedure<TInput, TOutput, 'mutation', TContext> {
+  /** Define a write/mutation procedure. */
+  mutation<TOutput>(resolver: (opts: { input: TInput; ctx: TContext; signal?: AbortSignal; broadcast: { invalidate: (path: string) => void } }) => Promise<TOutput> | TOutput): AnyProcedure {
     return this.createProcedure('mutation', resolver);
   }
 
-  subscription<TOutput>(resolver: (opts: { input: TInput; ctx: TContext; emit: (data: TOutput) => void; signal?: AbortSignal; broadcast: { invalidate: (path: string) => void } }) => Promise<void | (() => void)> | void | (() => void)): Procedure<TInput, TOutput, 'subscription', TContext> {
+  /** Define a subscription procedure (main → renderer push). */
+  subscription<TOutput>(resolver: (opts: { input: TInput; ctx: TContext; emit: (data: TOutput) => void; signal?: AbortSignal; broadcast: { invalidate: (path: string) => void } }) => Promise<void | (() => void)> | void | (() => void)): AnyProcedure {
     return this.createProcedure('subscription', resolver as any);
   }
 
-  channel<TOutput>(resolver: (opts: { input: TInput; ctx: TContext; emit: (data: TOutput) => void; onData: (listener: (data: any) => void) => void; signal?: AbortSignal; broadcast: { invalidate: (path: string) => void } }) => Promise<void | (() => void)> | void | (() => void)): Procedure<TInput, TOutput, 'channel', TContext> {
+  /** Define a bidirectional channel procedure (main ↔ renderer). */
+  channel<TOutput>(resolver: (opts: { input: TInput; ctx: TContext; emit: (data: TOutput) => void; onData: (listener: (data: any) => void) => void; signal?: AbortSignal; broadcast: { invalidate: (path: string) => void } }) => Promise<void | (() => void)> | void | (() => void)): AnyProcedure {
     return this.createProcedure('channel', resolver as any);
   }
 
   private createProcedure<TOutput, TType extends ProcedureType>(
     type: TType,
     resolver: (opts: { input: TInput; ctx: TContext; emit: (data: any) => void; onData: (listener: (data: any) => void) => void; signal?: AbortSignal; broadcast: { invalidate: (path: string) => void } }) => any
-  ): Procedure<TInput, TOutput, TType, TContext> {
+  ): AnyProcedure {
     const procedure = async (opts: { input: TInput; ctx: TContext; path: string; emit?: (data: TOutput) => void; onData?: (listener: (data: any) => void) => void; signal?: AbortSignal; broadcast: { invalidate: (path: string) => void } }) => {
       let validInput = opts.input;
       if (this.schema) {
@@ -108,6 +88,10 @@ export class ProcedureBuilder<TInput = void, TContext = any> {
   }
 }
 
+/**
+ * Initialize the IPC builder with a context type.
+ * Returns utilities for creating procedures, routers, and middleware.
+ */
 export function initIpc<TContext = { event: IpcMainInvokeEvent }>() {
   return {
     procedure: new ProcedureBuilder<void, TContext>(),
@@ -122,6 +106,10 @@ export function initIpc<TContext = { event: IpcMainInvokeEvent }>() {
   };
 }
 
+/**
+ * Create a reactive store that can be shared across Electron windows via IPC.
+ * @param initialState - The initial state of the store.
+ */
 export function createIpcStore<T extends Record<string, any>>(initialState: T) {
   let state = { ...initialState };
   const subscribers: Set<(state: T) => void> = new Set();
@@ -144,24 +132,26 @@ export function createIpcStore<T extends Record<string, any>>(initialState: T) {
   };
 }
 
+/**
+ * Bind an IpcStore to ipcMain so renderer processes can read/write the store.
+ * @param ipcMain - Electron's ipcMain instance.
+ * @param storeName - Unique name for this store.
+ * @param store - The store instance created by createIpcStore.
+ * @param options - Optional webContents override for broadcasting.
+ */
 export function bindIpcStore<T extends Record<string, any>>(
   ipcMain: IpcMain,
   storeName: string,
   store: ReturnType<typeof createIpcStore<T>>,
   options: { webContents?: any } = {}
 ) {
-  const wContents = options.webContents || (() => {
-    try {
-      return require('electron').webContents;
-    } catch {
-      return null;
-    }
-  })();
+  const wContents = options.webContents || null;
 
   const broadcast = (state: T) => {
-    if (wContents && wContents.getAllWebContents) {
-      wContents.getAllWebContents().forEach((wc: any) => {
-        wc.send(`__ipc_store_${storeName}_update`, state);
+    const wc = wContents;
+    if (wc && wc.getAllWebContents) {
+      wc.getAllWebContents().forEach((wcItem: any) => {
+        wcItem.send(`__ipc_store_${storeName}_update`, state);
       });
     }
   };
@@ -179,40 +169,64 @@ export function bindIpcStore<T extends Record<string, any>>(
     store.reset();
     return store.get();
   });
+
+  // Return cleanup function
+  return () => {
+    ipcMain.removeHandler(`__ipc_store_${storeName}_get`);
+    ipcMain.removeHandler(`__ipc_store_${storeName}_set`);
+    ipcMain.removeHandler(`__ipc_store_${storeName}_reset`);
+  };
 }
 
-const registeredProcedures = new Map<string, AnyProcedure>();
-const globalActiveRequests = new Map<string, AbortController>();
-
+/**
+ * Bind a router to ipcMain, registering handlers for all procedures.
+ * Each call creates its own isolated state (no global singletons).
+ *
+ * @param ipcMain - Electron's ipcMain instance.
+ * @param router - The router object created by initIpc().router().
+ * @param createContext - Optional factory for creating request context.
+ * @param options - Optional webContents override for broadcast invalidation.
+ * @returns A dispose function to remove all registered handlers.
+ */
 export function bindIpcRouter(
   ipcMain: IpcMain,
   router: AnyRouter,
   createContext?: (event: IpcMainInvokeEvent) => any | Promise<any>,
   options: { webContents?: any } = {},
   path = ''
-) {
-  const wContents = options.webContents || (() => {
-    try {
-      return require('electron').webContents;
-    } catch {
-      return null;
-    }
-  })();
+): () => void {
+  // Per-call state — avoids global mutable singletons
+  const registeredProcedures = new Map<string, AnyProcedure>();
+  const globalActiveRequests = new Map<string, AbortController>();
+  const registeredHandlers: string[] = [];
+  const abortListeners: Array<{ channel: string; handler: (...args: any[]) => void }> = [];
+
+  const wContents = options.webContents || null;
 
   const broadcast = {
     invalidate: (queryKey: string) => {
-      if (wContents && wContents.getAllWebContents) {
-        wContents.getAllWebContents().forEach((wc: any) => {
-          wc.send('__ipc_invalidate', queryKey);
+      const wc = wContents;
+      if (wc && wc.getAllWebContents) {
+        wc.getAllWebContents().forEach((wcItem: any) => {
+          wcItem.send('__ipc_invalidate', queryKey);
         });
       }
     }
   };
 
+  const handleProcedureError = (e: any) => {
+    if (e && e.name === 'ZodError' && e.issues) {
+      return { error: 'Validation failed', code: 'BAD_REQUEST', data: e.issues };
+    }
+    if (e instanceof IpcError) {
+      return { error: e.message, code: e.code, data: e.data };
+    }
+    return { error: e.message || 'Unknown error' };
+  };
+
+  // Register batch handler (only at root level)
   if (path === '') {
-    try {
-      ipcMain.removeHandler('__ipc_batch');
-    } catch (e) {}
+    ipcMain.removeHandler('__ipc_batch');
 
     ipcMain.handle('__ipc_batch', async (event, requests: Array<{ channel: string, input: any, invokeId?: string }>) => {
       const results = await Promise.all(requests.map(async (req) => {
@@ -236,13 +250,7 @@ export function bindIpcRouter(
           });
           return { data: result };
         } catch (e: any) {
-          if (e && e.name === 'ZodError' && e.issues) {
-            return { error: 'Validation failed', code: 'BAD_REQUEST', data: e.issues };
-          }
-          if (e instanceof IpcError) {
-            return { error: e.message, code: e.code, data: e.data };
-          }
-          return { error: e.message || 'Unknown error' };
+          return handleProcedureError(e);
         } finally {
           if (req.invokeId) {
             globalActiveRequests.delete(req.invokeId);
@@ -251,6 +259,8 @@ export function bindIpcRouter(
       }));
       return results;
     });
+
+    registeredHandlers.push('__ipc_batch');
   }
 
   for (const [key, value] of Object.entries(router)) {
@@ -263,13 +273,15 @@ export function bindIpcRouter(
       
       if (procedure._type === 'query' || procedure._type === 'mutation') {
         // Listen for explicit abort messages from the renderer
-        ipcMain.on(`${currentPath}.abort`, (_event, invokeId: string) => {
+        const abortHandler = (_event: any, invokeId: string) => {
           const controller = globalActiveRequests.get(invokeId);
           if (controller) {
             controller.abort();
             globalActiveRequests.delete(invokeId);
           }
-        });
+        };
+        ipcMain.on(`${currentPath}.abort`, abortHandler);
+        abortListeners.push({ channel: `${currentPath}.abort`, handler: abortHandler });
 
         ipcMain.handle(currentPath, async (event, input, invokeId?: string) => {
           let controller: AbortController | undefined;
@@ -290,32 +302,20 @@ export function bindIpcRouter(
             });
             return { data: result };
           } catch (e: any) {
-            if (e && e.name === 'ZodError' && e.issues) {
-              return {
-                error: 'Validation failed',
-                code: 'BAD_REQUEST',
-                data: e.issues
-              };
-            }
-            if (e instanceof IpcError) {
-              return { 
-                error: e.message, 
-                code: e.code, 
-                data: e.data 
-              };
-            }
-            return { error: e.message || 'Unknown error' };
+            return handleProcedureError(e);
           } finally {
             if (invokeId) {
               globalActiveRequests.delete(invokeId);
             }
           }
         });
+
+        registeredHandlers.push(currentPath);
       } else if (procedure._type === 'subscription' || procedure._type === 'channel') {
         const activeSubscriptions = new Map<string, () => void>();
         const activeListeners = new Map<string, (data: any) => void>();
 
-        ipcMain.on(currentPath, async (event, payload) => {
+        const subscriptionHandler = async (event: any, payload: any) => {
           try {
             if (payload && payload.__action === 'subscribe') {
               const { __subId, input } = payload;
@@ -376,12 +376,26 @@ export function bindIpcRouter(
           } catch (error) {
             console.error(`Error in subscription ${currentPath}:`, error);
           }
-        });
+        };
+
+        ipcMain.on(currentPath, subscriptionHandler);
+        abortListeners.push({ channel: currentPath, handler: subscriptionHandler });
       }
     } else {
-      // Nested router
+      // Nested router — recursively bind
       bindIpcRouter(ipcMain, value as AnyRouter, createContext, options, currentPath);
     }
   }
-}
 
+  // Return cleanup/dispose function
+  return () => {
+    for (const handler of registeredHandlers) {
+      ipcMain.removeHandler(handler);
+    }
+    for (const { channel, handler } of abortListeners) {
+      ipcMain.removeListener(channel, handler);
+    }
+    globalActiveRequests.clear();
+    registeredProcedures.clear();
+  };
+}

@@ -84,7 +84,8 @@ test('nested router binding and deep execution', async () => {
 
   const mockIpcMain = {
     handle: vi.fn(),
-    on: vi.fn()
+    on: vi.fn(),
+    removeHandler: vi.fn()
   } as any;
 
   bindIpcRouter(mockIpcMain, appRouter);
@@ -124,7 +125,8 @@ test('IpcError serialization', async () => {
 
   const mockIpcMain = {
     handle: vi.fn(),
-    on: vi.fn()
+    on: vi.fn(),
+    removeHandler: vi.fn()
   } as any;
 
   bindIpcRouter(mockIpcMain, appRouter);
@@ -158,7 +160,8 @@ test('AbortSignal cancellation', async () => {
 
   const mockIpcMain = {
     handle: vi.fn(),
-    on: vi.fn()
+    on: vi.fn(),
+    removeHandler: vi.fn()
   } as any;
 
   bindIpcRouter(mockIpcMain, appRouter);
@@ -194,7 +197,8 @@ test('Pub/Sub Cross-Window Broadcast Invalidation', async () => {
 
   const mockIpcMain = {
     handle: vi.fn(),
-    on: vi.fn()
+    on: vi.fn(),
+    removeHandler: vi.fn()
   } as any;
 
   let broadcastedPayload = null;

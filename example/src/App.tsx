@@ -499,3 +499,109 @@ function ChannelDemo() {
 }
 
 export default App
+
+// --- DEMO COMPONENTS ---
+
+function WindowControlDemo() {
+  const windowControl = ipc.system.controlWindow.useMutation();
+
+  return (
+    <div>
+      <div style={{ display: 'flex', gap: '10px', marginTop: '10px' }}>
+        <button onClick={() => windowControl.mutate({ action: 'minimize' })}>
+          Minimize
+        </button>
+        <button onClick={() => windowControl.mutate({ action: 'maximize' })}>
+          Maximize/Restore
+        </button>
+        <button onClick={() => windowControl.mutate({ action: 'close' })} className="danger">
+          Close
+        </button>
+      </div>
+    </div>
+  )
+}
+
+function OSNotificationDemo() {
+  const notificationMutation = ipc.system.showNotification.useMutation();
+  const [notifText, setNotifText] = useState('Hello from React via IPC!');
+
+  return (
+    <div>
+      <h3 style={{ marginBottom: '10px', fontSize: '1rem' }}>Native OS Notifications</h3>
+      <div className="input-group">
+        <input 
+          type="text" 
+          value={notifText} 
+          onChange={(e) => setNotifText(e.target.value)} 
+        />
+        <button 
+          onClick={() => notificationMutation.mutate({ title: 'React Query IPC', body: notifText })}
+          disabled={notificationMutation.isPending}
+        >
+          Show
+        </button>
+      </div>
+    </div>
+  )
+}
+
+function DragAndDropDemo() {
+  const processDrop = ipc.system.processDroppedFile.useMutation();
+  const [isDragging, setIsDragging] = useState(false);
+
+  return (
+    <div style={{ marginTop: '15px' }}>
+      <div 
+        onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
+        onDragLeave={() => setIsDragging(false)}
+        onDrop={(e) => {
+          e.preventDefault();
+          setIsDragging(false);
+          const file = e.dataTransfer.files[0];
+          if (file) {
+            // In Electron, File objects have a `path` property!
+            processDrop.mutate({ filePath: (file as any).path });
+          }
+        }}
+        style={{
+          border: `2px dashed ${isDragging ? '#00d8ff' : '#666'}`,
+          borderRadius: '8px',
+          padding: '40px 20px',
+          textAlign: 'center',
+          background: isDragging ? 'rgba(0, 216, 255, 0.1)' : 'rgba(0, 0, 0, 0.2)',
+          transition: 'all 0.2s',
+          cursor: 'pointer'
+        }}
+      >
+        {processDrop.isPending ? 'Processing File...' : 'Drop a text file here!'}
+      </div>
+
+      {processDrop.error && (
+        <div className="error-block" style={{ marginTop: '10px' }}>
+          <strong>Error:</strong> {processDrop.error.message}
+        </div>
+      )}
+
+      {processDrop.data && (
+        <div className="result-block" style={{ marginTop: '15px' }}>
+          <div className="result-label">File Preview ({processDrop.data.name})</div>
+          <div style={{ fontSize: '0.8em', color: '#999', marginBottom: '8px' }}>
+            Size: {(processDrop.data.size / 1024).toFixed(2)} KB
+          </div>
+          <pre style={{ 
+            background: '#111', 
+            padding: '10px', 
+            borderRadius: '4px', 
+            fontSize: '12px', 
+            overflowX: 'auto',
+            whiteSpace: 'pre-wrap',
+            margin: 0
+          }}>
+            {processDrop.data.preview || '(Empty File)'}
+          </pre>
+        </div>
+      )}
+    </div>
+  )
+}
