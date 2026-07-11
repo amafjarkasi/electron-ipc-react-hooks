@@ -28,31 +28,60 @@
 
 ---
 
+<p align="center">
+  <a href="#whats-new-in-132"><img src="https://img.shields.io/badge/1.3.2-DX%20%26%20hardenings-4FC3F7?style=flat-square" alt="1.3.2" /></a>
+  <a href="#whats-new-in-131"><img src="https://img.shields.io/badge/1.3.1-reliability-61DAFB?style=flat-square" alt="1.3.1" /></a>
+  <a href="#-30-second-setup"><img src="https://img.shields.io/badge/Setup-3%20steps-3178C6?style=flat-square" alt="Setup" /></a>
+  <a href="#-feature-deep-dives"><img src="https://img.shields.io/badge/Features-18%20deep%20dives-2596be?style=flat-square" alt="Features" /></a>
+  <a href="#-complete-api-reference"><img src="https://img.shields.io/badge/API-reference-8b9aab?style=flat-square" alt="API" /></a>
+</p>
+
+<details>
+<summary><strong>Table of contents</strong></summary>
+
+- [What's new in 1.3.2](#whats-new-in-132)
+- [What's new in 1.3.1](#whats-new-in-131)
+- [30-Second Setup](#-30-second-setup)
+- [Feature Deep Dives](#-feature-deep-dives)
+- [Complete API Reference](#-complete-api-reference)
+- [Testing](#testing)
+- [Example App](#example-app)
+- [Troubleshooting](#troubleshooting)
+- [Roadmap](#roadmap)
+
+</details>
+
+---
+
 ## What's new in 1.3.2
 
-| Area | Change |
-|---|---|
-| **DevTools** | Concurrent same-path calls match via FIFO queues + optional `id` |
-| **Rate limiter** | Expired empty keys are pruned |
-| **Query keys** | `stableSerialize` sorts object keys so cache identity is order-independent |
-| **Subscriptions** | Unscoped (no `__subId`) payloads ignored by default; opt in with `legacyUnscopedPayloads: true` |
+<sub>Current package version · see also <a href="./docs/REVIEW.md"><code>docs/REVIEW.md</code></a></sub>
+
+| Area | Change | Why it matters |
+|---|---|---|
+| **DevTools** | Concurrent same-path calls match via FIFO queues + optional `id` | Parallel `getUser` calls no longer overwrite each other in the recorder |
+| **Rate limiter** | Expired empty keys are pruned | Long-running apps don’t leak Map entries after quiet windows |
+| **Query keys** | `stableSerialize` sorts object keys so cache identity is order-independent | `{ a:1, b:2 }` and `{ b:2, a:1 }` hit the same React Query cache |
+| **Subscriptions** | Unscoped (no `__subId`) payloads ignored by default; opt in with `legacyUnscopedPayloads: true` | Stops accidental fan-out to every listener on a channel |
+
+---
 
 ## What's new in 1.3.1
 
-Recent correctness and DX fixes (see [`docs/REVIEW.md`](./docs/REVIEW.md) for the full review):
+<sub>Correctness + DX from the review pass · full matrix in <a href="./docs/REVIEW.md"><code>docs/REVIEW.md</code></a></sub>
 
-| Area | Change |
-|---|---|
-| **Nested routers** | `__ipc_batch` resolves nested paths (e.g. `system.getInfo`); root `dispose()` tears down nested handlers |
-| **Cross-window sync** | Pass `{ webContents }` into `bindIpcRouter` / `bindIpcStore` so `broadcast.invalidate` and store updates reach all windows |
-| **Shared store** | Store updates no longer double-fire under React StrictMode; dispose unsubscribes the broadcast listener |
-| **Types** | Procedure builders preserve literal `_type`, so renderer hooks infer correctly (no collapsed union) |
-| **Subscriptions** | Latest `onData` / `onError` always used (refs); main failures surface via `{ __error }` → `onError` |
-| **Batching** | Transport failure of `__ipc_batch` falls back to individual invokes; per-item errors stay isolated |
-| **Re-bind / HMR** | `bindIpcRouter` clears prior handlers/listeners before registering (safe without dispose) |
-| **Cleanup warn** | Dev warning when a subscription/channel omits its cleanup return |
-| **Tests** | Vitest (unit + browser mock harness) + Playwright Electron E2E against `/example` |
-| **CI** | GitHub Actions runs unit/harness on PRs; E2E on Ubuntu with xvfb |
+| Area | Change | Why it matters |
+|---|---|---|
+| **Nested routers** | `__ipc_batch` resolves nested paths (e.g. `system.getInfo`); root `dispose()` tears down nested handlers | Nested queries work when batched; HMR/tests don’t leak handlers |
+| **Cross-window sync** | Pass `{ webContents }` into `bindIpcRouter` / `bindIpcStore` so `broadcast.invalidate` and store updates reach all windows | Multi-window invalidate/store sync actually fires |
+| **Shared store** | Store updates no longer double-fire under React StrictMode; dispose unsubscribes the broadcast listener | StrictMode-safe; no ghost subscriptions after dispose |
+| **Types** | Procedure builders preserve literal `_type`, so renderer hooks infer correctly (no collapsed union) | `useQuery` / `useMutation` / etc. stay correctly typed |
+| **Subscriptions** | Latest `onData` / `onError` always used (refs); main failures surface via `{ __error }` → `onError` | No stale callbacks; setup failures reach the UI |
+| **Batching** | Transport failure of `__ipc_batch` falls back to individual invokes; per-item errors stay isolated | One bad request doesn’t kill the whole batch |
+| **Re-bind / HMR** | `bindIpcRouter` clears prior handlers/listeners before registering (safe without dispose) | Re-bind without dispose won’t double-fire |
+| **Cleanup warn** | Dev warning when a subscription/channel omits its cleanup return | Catch missing `return () => …` early |
+| **Tests** | Vitest (unit + browser mock harness) + Playwright Electron E2E against `/example` | ~55 unit/harness tests + 9 E2E specs |
+| **CI** | GitHub Actions runs unit/harness on PRs; E2E on Ubuntu with xvfb | PRs get automated coverage |
 
 ---
 
@@ -482,7 +511,7 @@ send({ row: parsedRow, totalRows: 1000 }); // Send TO main
 
 ### 12. ⚡ Request Batching (Enabled by Default)
 
-**What it is:** When a React component renders and triggers multiple queries at the same time (e.g., a dashboard that loads user info, organization data, and statistics simultaneously), the library automatically collects those queries and sends them in a single `__ipc_batch` IPC call. Queries are queued briefly (default **10ms**) then flushed together. Nested procedure paths (e.g. `system.getInfo`) are included in the batch registry. Mutations are never batched. Each hook still receives its own result transparently.
+**What it is:** When a React component renders and triggers multiple queries at the same time (e.g., a dashboard that loads user info, organization data, and statistics simultaneously), the library automatically collects those queries and sends them in a single `__ipc_batch` IPC call. Queries are queued briefly (default **10ms**) then flushed together. Nested procedure paths (e.g. `system.getInfo`) are included in the batch registry. Mutations are never batched. Each hook still receives its own result transparently. Application errors are per-item; if the `__ipc_batch` transport itself fails, the client falls back to individual `invoke`s so siblings can still succeed.
 
 **🎯 Real-World Scenarios:**
 - **Dashboards** — Load user + org + stats + notifications in one batch instead of 4 separate IPC calls.
@@ -598,7 +627,7 @@ setState({ theme: 'dark' }); // Updates main + all other windows (when webConten
 
 **What it is:** An optional observability helper that records IPC call path, input, duration, and success/failure. You can query history, stats, and subscribe to updates to build an in-app panel.
 
-> **Not auto-wired.** `createDevTools()` does **not** hook into `bindIpcRouter` automatically. Call `recordCall` / `recordResponse` yourself (or wrap middleware) if you want traffic recorded. Concurrent calls to the same path should use unique IDs if you instrument manually — the helper currently keys pending calls by path.
+> **Not auto-wired.** `createDevTools()` does **not** hook into `bindIpcRouter` automatically. Call `recordCall` / `recordResponse` yourself (or wrap middleware) if you want traffic recorded. Concurrent same-path calls are matched FIFO; pass an optional `id` on both `recordCall` and `recordResponse` when you need out-of-order matching.
 
 **🎯 Real-World Scenarios:**
 - **Performance profiling** — Find the slowest IPC calls. Is `searchDocuments` taking 2s? Optimize it.
@@ -614,7 +643,7 @@ setState({ theme: 'dark' }); // Updates main + all other windows (when webConten
 
 ### 18. 🧹 Cleanup & Dispose
 
-**What it is:** Both `bindIpcRouter` and `bindIpcStore` return a dispose function. Calling it removes registered `ipcMain` handlers **and** nested-router handlers, abort listeners, and (for stores) the broadcast subscription. Use it for multi-window teardown, tests, HMR, and plugins.
+**What it is:** Both `bindIpcRouter` and `bindIpcStore` return a dispose function. Calling it removes registered `ipcMain` handlers **and** nested-router handlers, abort listeners, and (for stores) the broadcast subscription. Use it for multi-window teardown, tests, HMR, and plugins. Re-binding without dispose is also safer now: `bindIpcRouter` clears prior listeners/handlers for each path before registering.
 
 **🎯 Real-World Scenarios:**
 - **Multi-window apps** — Window closes → dispose its IPC handlers → no memory leaks.
@@ -644,7 +673,7 @@ Prefer **subpath imports** so main/preload/renderer bundles stay isolated:
 ```typescript
 import { initIpc, bindIpcRouter, bindIpcStore, createIpcStore, IpcError, createRateLimiter, createDevTools } from 'electron-ipc-react-hooks/main';
 import { exposeIpc } from 'electron-ipc-react-hooks/preload';
-import { createReactIpc, createReactIpcStore, useIpcInvalidator, IpcTypedError } from 'electron-ipc-react-hooks/renderer';
+import { createReactIpc, createReactIpcStore, useIpcInvalidator, IpcTypedError, createIpcErrorFromResponse, stableSerialize } from 'electron-ipc-react-hooks/renderer';
 
 // Root entry re-exports everything (fine for docs/tests; avoid pulling main into renderer bundles)
 import { initIpc } from 'electron-ipc-react-hooks';
@@ -661,7 +690,7 @@ import { initIpc } from 'electron-ipc-react-hooks';
 | `IpcError` | `class extends Error` | Structured error for Main → Renderer |
 | `ProcedureBuilder` | Class | Chainable: `.input()`, `.use()`, `.query()`, `.mutation()`, `.subscription()`, `.channel()` |
 | `createRateLimiter` | `(options) => Middleware` | Sliding-window rate limiting middleware |
-| `createDevTools` | `(options?) => IpcDevTools` | Manual IPC traffic recorder (not auto-wired) |
+| `createDevTools` | `(options?) => IpcDevTools` | Manual IPC traffic recorder (FIFO + optional `id`; not auto-wired) |
 
 ### Procedure Builder Methods
 
@@ -727,11 +756,13 @@ exposeIpc(contextBridge, ipcRenderer, 'myCustomApi');
 
 | Export | Signature | Purpose |
 |---|---|---|
-| `createReactIpc<TRouter>` | `(apiKey?, options?) => ReactIpcClient` | Create typed hook client |
+| `createReactIpc<TRouter>` | `(apiKey?, options?: CreateReactIpcOptions) => ReactIpcClient` | Create typed hook client |
 | `createReactIpcStore<T>` | `(storeName, initialState, apiKey?) => () => [T, setter, resetter]` | React hook for shared state |
 | `useIpcInvalidator` | `(queryClient, apiKey?) => void` | Listen for cross-window invalidation |
 | `IpcTypedError` | `class extends Error { code, data, toJSON() }` | Typed error from IPC |
 | `createIpcErrorFromResponse` | `(response) => IpcTypedError` | Create IpcTypedError from raw object |
+| `stableSerialize` | `(value) => string` | Order-independent JSON for query/sub keys (used internally; exported for tests/custom keys) |
+| `CreateReactIpcOptions` | `type` | `{ batching?, batchingTimeout?, legacyUnscopedPayloads? }` |
 
 ### `createReactIpc` Options
 
@@ -877,6 +908,8 @@ Upgrade to a build that shares the procedure registry across nested routers (fix
 | **Auto-Reconnecting Subscriptions** — Exponential backoff on focus/network restore | Planned |
 | **Optimistic Updates Helper** — Auto rollback on IPC error | Planned |
 | **Auto-instrumented DevTools** — Optional wiring inside `bindIpcRouter` | Planned |
+
+<sub>Shipped in 1.3.x (no longer planned): subscription <code>onError</code>, batch isolation, stable query keys, safe re-bind, DevTools concurrent matching, rate-limiter prune.</sub>
 
 ---
 
