@@ -152,4 +152,35 @@ describe('IpcDevTools', () => {
     expect(devtools.getHistory()).toHaveLength(1);
     expect(devtools.getHistory()[0].path).toBe('b');
   });
+
+  test('matches concurrent same-path calls FIFO without id', () => {
+    devtools.recordCall({ path: 'getUser', type: 'query', input: { id: '1' }, timestamp: 1 });
+    devtools.recordCall({ path: 'getUser', type: 'query', input: { id: '2' }, timestamp: 2 });
+
+    devtools.recordResponse({ path: 'getUser', duration: 10, success: true, data: 'first' });
+    devtools.recordResponse({ path: 'getUser', duration: 20, success: true, data: 'second' });
+
+    const history = devtools.getHistory();
+    expect(history).toHaveLength(2);
+    expect(history[0].input).toEqual({ id: '1' });
+    expect(history[0].data).toBe('first');
+    expect(history[1].input).toEqual({ id: '2' });
+    expect(history[1].data).toBe('second');
+  });
+
+  test('matches concurrent same-path calls by explicit id', () => {
+    devtools.recordCall({ path: 'getUser', type: 'query', input: { id: '1' }, timestamp: 1, id: 'a' });
+    devtools.recordCall({ path: 'getUser', type: 'query', input: { id: '2' }, timestamp: 2, id: 'b' });
+
+    // Respond out of order
+    devtools.recordResponse({ path: 'getUser', duration: 5, success: true, data: 'two', id: 'b' });
+    devtools.recordResponse({ path: 'getUser', duration: 15, success: true, data: 'one', id: 'a' });
+
+    const history = devtools.getHistory();
+    expect(history[0].input).toEqual({ id: '2' });
+    expect(history[0].data).toBe('two');
+    expect(history[1].input).toEqual({ id: '1' });
+    expect(history[1].data).toBe('one');
+  });
+
 });

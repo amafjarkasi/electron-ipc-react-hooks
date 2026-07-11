@@ -154,4 +154,24 @@ describe('createRateLimiter', () => {
       appRouter.ping({ input: undefined, ctx: { userId: 'A' }, path: 'ping', broadcast })
     ).rejects.toThrow('Rate limit exceeded');
   });
+
+  test('prunes empty keys after the window expires', async () => {
+    const rateLimit = createRateLimiter({ max: 2, windowMs: 1000 });
+    const t = initIpc();
+    const appRouter = t.router({
+      a: t.procedure.use(rateLimit).query(() => 'a'),
+      b: t.procedure.use(rateLimit).query(() => 'b'),
+    });
+    const broadcast = { invalidate: () => {} };
+
+    await appRouter.a({ input: undefined, ctx: {}, path: 'a', broadcast });
+    expect(rateLimit._storeSize).toBe(1);
+
+    vi.advanceTimersByTime(1001);
+    await appRouter.b({ input: undefined, ctx: {}, path: 'b', broadcast });
+
+    // Expired key "a" removed; only "b" remains
+    expect(rateLimit._storeSize).toBe(1);
+  });
+
 });

@@ -55,8 +55,9 @@ export interface DevToolsOptions {
  * const devtools = createDevTools({ maxHistory: 50 });
  *
  * // In your main process handler:
- * devtools.recordCall({ path: 'getUser', type: 'query', input: { id: '1' }, timestamp: Date.now() });
- * devtools.recordResponse({ path: 'getUser', duration: 45, success: true, data: { name: 'Alice' } });
+ * const id = crypto.randomUUID();
+ * devtools.recordCall({ path: 'getUser', type: 'query', input: { id: '1' }, timestamp: Date.now(), id });
+ * devtools.recordResponse({ path: 'getUser', duration: 45, success: true, data: { name: 'Alice' }, id });
  *
  * // In a DevTools panel:
  * const history = devtools.getHistory();
@@ -64,10 +65,17 @@ export interface DevToolsOptions {
  * ```
  */
 export interface IpcDevTools {
-  /** Record the start of an IPC call */
-  recordCall(call: { path: string; type: string; input: any; timestamp: number }): void;
-  /** Record the response of an IPC call */
-  recordResponse(response: { path: string; duration: number; success: boolean; data?: any; error?: { message: string; code?: string; data?: any } }): void;
+  /** Record the start of an IPC call. Pass `id` when concurrent same-path calls are possible. */
+  recordCall(call: { path: string; type: string; input: any; timestamp: number; id?: string }): void;
+  /** Record the response of an IPC call. Match `id` to the corresponding `recordCall` when provided. */
+  recordResponse(response: {
+    path: string;
+    duration: number;
+    success: boolean;
+    data?: any;
+    error?: { message: string; code?: string; data?: any };
+    id?: string;
+  }): void;
   /** Get recorded history, optionally filtered */
   getHistory(filter?: { pathPrefix?: string }): IpcCallRecord[];
   /** Get aggregated statistics */
@@ -82,13 +90,20 @@ export interface IpcDevTools {
   disable(): void;
 }
 
+type PendingCall = { path: string; type: string; input: any; timestamp: number; id?: string };
+
+function pendingKey(path: string, id?: string): string {
+  return id !== undefined && id !== '' ? `${path}\0${id}` : path;
+}
+
 /**
  * Create an IpcDevTools instance for monitoring IPC traffic.
  */
 export function createDevTools(options: DevToolsOptions = {}): IpcDevTools {
   const maxHistory = options.maxHistory ?? 100;
 
-  const pendingCalls = new Map<string, { path: string; type: string; input: any; timestamp: number }>();
+  // Queues per key so concurrent same-path calls match FIFO (or by explicit id)
+  const pendingCalls = new Map<string, PendingCall[]>();
   const history: IpcCallRecord[] = [];
   const subscribers = new Set<(record: IpcCallRecord) => void>();
   let enabled = true;
@@ -96,14 +111,24 @@ export function createDevTools(options: DevToolsOptions = {}): IpcDevTools {
   return {
     recordCall(call) {
       if (!enabled) return;
-      pendingCalls.set(call.path, call);
+      const key = pendingKey(call.path, call.id);
+      const queue = pendingCalls.get(key);
+      if (queue) {
+        queue.push(call);
+      } else {
+        pendingCalls.set(key, [call]);
+      }
     },
 
     recordResponse(response) {
       if (!enabled) return;
-      const pending = pendingCalls.get(response.path);
-      if (!pending) return;
-      pendingCalls.delete(response.path);
+      const key = pendingKey(response.path, response.id);
+      const queue = pendingCalls.get(key);
+      if (!queue || queue.length === 0) return;
+      const pending = queue.shift()!;
+      if (queue.length === 0) {
+        pendingCalls.delete(key);
+      }
 
       const record: IpcCallRecord = {
         path: pending.path,

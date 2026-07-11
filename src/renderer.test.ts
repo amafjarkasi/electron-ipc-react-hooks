@@ -2,7 +2,7 @@ import { expect, test, vi, describe } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { createElement, StrictMode } from 'react';
-import { createReactIpc, createIpcErrorFromResponse, IpcTypedError, createReactIpcStore, useIpcInvalidator } from './renderer';
+import { createReactIpc, createIpcErrorFromResponse, IpcTypedError, createReactIpcStore, useIpcInvalidator, stableSerialize } from './renderer';
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: false } },
@@ -419,6 +419,54 @@ describe('batch isolation', () => {
     expect(r1.current.data).toBe(4);
     expect(r2.current.error).toBeInstanceOf(IpcTypedError);
     expect((r2.current.error as IpcTypedError).code).toBe('ODD');
+
+    delete (window as any).electronIpc;
+  });
+});
+
+describe('stableSerialize', () => {
+  test('sorts object keys recursively', () => {
+    expect(stableSerialize({ b: 1, a: { d: 2, c: 3 } })).toBe(
+      stableSerialize({ a: { c: 3, d: 2 }, b: 1 })
+    );
+  });
+});
+
+describe('legacyUnscopedPayloads', () => {
+  test('ignores unscoped payloads by default', async () => {
+    const mockApi = createMockApi();
+    (window as any).electronIpc = mockApi;
+    const ipc = createReactIpc('electronIpc', { batching: false });
+    const onData = vi.fn();
+
+    renderHook(
+      () => (ipc as any).clock.useSubscription(undefined, { onData }),
+      { wrapper }
+    );
+
+    await act(async () => {
+      mockApi._emit('clock', { tick: 'legacy' });
+    });
+    expect(onData).not.toHaveBeenCalled();
+
+    delete (window as any).electronIpc;
+  });
+
+  test('accepts unscoped payloads when legacyUnscopedPayloads is true', async () => {
+    const mockApi = createMockApi();
+    (window as any).electronIpc = mockApi;
+    const ipc = createReactIpc('electronIpc', { batching: false, legacyUnscopedPayloads: true });
+    const onData = vi.fn();
+
+    renderHook(
+      () => (ipc as any).clock.useSubscription(undefined, { onData }),
+      { wrapper }
+    );
+
+    await act(async () => {
+      mockApi._emit('clock', { tick: 'legacy' });
+    });
+    expect(onData).toHaveBeenCalledWith({ tick: 'legacy' });
 
     delete (window as any).electronIpc;
   });

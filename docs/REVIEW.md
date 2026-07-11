@@ -1,4 +1,4 @@
-# Code Review: electron-ipc-react-hooks v1.3.1
+# Code Review: electron-ipc-react-hooks v1.3.2
 
 Review date: 2026-07-11  
 Scope: library `src/`, example app, tests, docs accuracy, performance notes.
@@ -43,10 +43,7 @@ Scope: library `src/`, example app, tests, docs accuracy, performance notes.
 
 ## Medium severity (documented; deferred)
 
-| ID | Finding | Recommendation |
-|----|---------|----------------|
-| **M3** | DevTools `pendingCalls` keyed by path only — concurrent same-path overwrites | Key by `path + id` |
-| **M4** | Rate limiter Map never deletes empty keys | Periodic prune of empty entries |
+_None remaining from the original review pass._
 
 ## Medium severity (fixed this pass)
 
@@ -54,6 +51,8 @@ Scope: library `src/`, example app, tests, docs accuracy, performance notes.
 |----|---------|-----|
 | **M1** | `onData` not in subscription/channel effect deps — stale callbacks | Keep `onData` / `onError` in refs; effect only depends on channel + input |
 | **M2** | Subscription/channel errors only `console.error` on main — renderer never notified | Main sends `{ __subId, __error }`; hooks expose `onError` |
+| **M3** | DevTools `pendingCalls` keyed by path only — concurrent same-path overwrites | Queue per key + optional `id`; FIFO when id omitted |
+| **M4** | Rate limiter Map never deletes empty keys | Prune expired empty keys on each check |
 | **M5** | `useIpcInvalidator` froze `apiRef` at first render | Re-read `window[apiKey]` inside the effect |
 | **M6** | Re-binding router without dispose duplicated `ipcMain.on` listeners | `removeAllListeners` / `removeHandler` before re-register |
 | **M7** | Subscription resolver that omits cleanup fn cannot be unsubscribed on main | Dev-time `console.warn` when cleanup is missing |
@@ -69,13 +68,15 @@ Scope: library `src/`, example app, tests, docs accuracy, performance notes.
 | **L4** | CI workflow added at `.github/workflows/ci.yml` |
 | **L5** | `example/README.md` updated with run/test instructions |
 | **L6** | DevTools not auto-wired into `bindIpcRouter` (manual instrumentation only) |
+| **L7** | Query keys use `stableSerialize` (sorted object keys) instead of raw `JSON.stringify` |
+| **L8** | Legacy unscoped subscription payloads gated behind `legacyUnscopedPayloads: true` (default off) |
 
 ## Performance notes
 
 - **Batching (default 10ms):** Correct for flat and nested paths after H2. Application errors are per-item; transport failure of `__ipc_batch` falls back to individual invokes (M8).
-- **Query keys:** `[channel, JSON.stringify(input)]` is order-sensitive for object keys; prefer stable serialization if consumers pass unordered objects.
-- **Legacy subscription fallback:** Messages without `__subId` fan out to every listener on the channel — keep for compat, prefer always wrapping payloads.
-- **Rate limiter:** Sliding window is O(n) per call on the timestamp array; fine for typical IPC rates.
+- **Query keys:** `[channel, stableSerialize(input)]` — object key order no longer affects cache identity.
+- **Legacy subscription fallback:** Opt-in via `createReactIpc(..., { legacyUnscopedPayloads: true })`; default ignores unscoped payloads.
+- **Rate limiter:** Sliding window is O(n) per call on the timestamp array; empty keys are pruned (M4).
 
 ## Out of scope (follow-ups)
 

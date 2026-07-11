@@ -53,6 +53,33 @@ function generateId(): string {
 }
 
 /**
+ * Stable JSON serialization for query/subscription keys.
+ * Object keys are sorted recursively so `{ a: 1, b: 2 }` and `{ b: 2, a: 1 }` match.
+ */
+export function stableSerialize(value: unknown): string {
+  return JSON.stringify(value, (_key, val) => {
+    if (val && typeof val === 'object' && !Array.isArray(val)) {
+      const sorted: Record<string, unknown> = {};
+      for (const k of Object.keys(val as object).sort()) {
+        sorted[k] = (val as Record<string, unknown>)[k];
+      }
+      return sorted;
+    }
+    return val;
+  });
+}
+
+export type CreateReactIpcOptions = {
+  batching?: boolean;
+  batchingTimeout?: number;
+  /**
+   * When true, subscription/channel listeners also accept payloads without `__subId`
+   * (legacy fan-out to every listener on the channel). Default: false.
+   */
+  legacyUnscopedPayloads?: boolean;
+};
+
+/**
  * Create a React hook that connects to an IpcStore in the main process.
  * @param storeName - Unique name matching the store bound in main.
  * @param initialState - Fallback initial state before main process responds.
@@ -228,8 +255,9 @@ export function useIpcInvalidator(queryClient: QueryClient, apiKey = 'electronIp
  */
 export function createReactIpc<TRouter extends RendererAnyRouter>(
   apiKey = 'electronIpc',
-  options: { batching?: boolean; batchingTimeout?: number } = { batching: true, batchingTimeout: 10 }
+  options: CreateReactIpcOptions = { batching: true, batchingTimeout: 10 }
 ): ReactIpcClient<TRouter> {
+  const legacyUnscopedPayloads = options.legacyUnscopedPayloads === true;
   let batchQueue: Array<{ channel: string, input: any, invokeId: string, resolve: (val: any) => void, reject: (err: any) => void }> = [];
   let batchTimer: any = null;
 
@@ -302,8 +330,7 @@ export function createReactIpc<TRouter extends RendererAnyRouter>(
             const api = (window as any)[apiKey];
             if (!api) throw new Error(`Could not find window.${apiKey}`);
             const channel = path.join('.');
-            // Memoize the serialized input key for stable query keys
-            const inputKey = useMemo(() => JSON.stringify(input), [input]);
+            const inputKey = useMemo(() => stableSerialize(input), [input]);
             return useQuery({
               queryKey: [channel, inputKey],
               queryFn: async ({ signal }: { signal?: AbortSignal }) => {
@@ -334,7 +361,7 @@ export function createReactIpc<TRouter extends RendererAnyRouter>(
             const api = (window as any)[apiKey];
             if (!api) throw new Error(`Could not find window.${apiKey}`);
             const channel = path.join('.');
-            const inputKey = useMemo(() => JSON.stringify(input), [input]);
+            const inputKey = useMemo(() => stableSerialize(input), [input]);
             return useInfiniteQuery({
               queryKey: [channel, inputKey],
               queryFn: async ({ pageParam, signal }: { pageParam?: any, signal?: AbortSignal }) => {
@@ -383,7 +410,7 @@ export function createReactIpc<TRouter extends RendererAnyRouter>(
             const api = (window as any)[apiKey];
             if (!api) throw new Error(`Could not find window.${apiKey}`);
             const channel = path.join('.');
-            const inputKey = useMemo(() => JSON.stringify(input), [input]);
+            const inputKey = useMemo(() => stableSerialize(input), [input]);
             const onDataRef = useRef(subOptions?.onData);
             const onErrorRef = useRef(subOptions?.onError);
             onDataRef.current = subOptions?.onData;
@@ -399,8 +426,7 @@ export function createReactIpc<TRouter extends RendererAnyRouter>(
                     return;
                   }
                   onDataRef.current?.(data.payload);
-                } else if (data && data.__subId === undefined) {
-                  // Legacy fallback if the main process didn't wrap the payload
+                } else if (legacyUnscopedPayloads && data && data.__subId === undefined) {
                   onDataRef.current?.(data);
                 }
               };
@@ -427,7 +453,7 @@ export function createReactIpc<TRouter extends RendererAnyRouter>(
             const channel = path.join('.');
 
             const [subId] = useState(() => generateId());
-            const inputKey = useMemo(() => JSON.stringify(input), [input]);
+            const inputKey = useMemo(() => stableSerialize(input), [input]);
             const onDataRef = useRef(channelOptions?.onData);
             const onErrorRef = useRef(channelOptions?.onError);
             onDataRef.current = channelOptions?.onData;
@@ -441,7 +467,7 @@ export function createReactIpc<TRouter extends RendererAnyRouter>(
                     return;
                   }
                   onDataRef.current?.(data.payload);
-                } else if (data && data.__subId === undefined) {
+                } else if (legacyUnscopedPayloads && data && data.__subId === undefined) {
                   onDataRef.current?.(data);
                 }
               };

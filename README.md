@@ -8,7 +8,7 @@
   [![License](https://img.shields.io/npm/l/electron-ipc-react-hooks?style=for-the-badge&color=7C4DFF)](https://opensource.org/licenses/MIT)
   [![TypeScript](https://img.shields.io/badge/TypeScript-Strict-3178C6?style=for-the-badge&logo=typescript)](https://www.typescriptlang.org/)
   [![tRPC Inspired](https://img.shields.io/badge/tRPC-Inspired-2596be?style=for-the-badge&logo=trpc)](https://trpc.io)
-  [![Tests](https://img.shields.io/badge/Tests-49%20passing-4FC3F7?style=for-the-badge&logo=vitest)](https://vitest.dev/)
+  [![Tests](https://img.shields.io/badge/Tests-55%20passing-4FC3F7?style=for-the-badge&logo=vitest)](https://vitest.dev/)
 
   <br />
 
@@ -27,6 +27,15 @@
 > Define a router in Main. Import its **type** in Renderer. Call `ipc.getUser.useQuery('email')` — and get back `{ data, isLoading, error }` powered by TanStack React Query. Your router types flow through the preload bridge automatically. **No code gen. No compromise.**
 
 ---
+
+## What's new in 1.3.2
+
+| Area | Change |
+|---|---|
+| **DevTools** | Concurrent same-path calls match via FIFO queues + optional `id` |
+| **Rate limiter** | Expired empty keys are pruned |
+| **Query keys** | `stableSerialize` sorts object keys so cache identity is order-independent |
+| **Subscriptions** | Unscoped (no `__subId`) payloads ignored by default; opt in with `legacyUnscopedPayloads: true` |
 
 ## What's new in 1.3.1
 
@@ -728,8 +737,9 @@ exposeIpc(contextBridge, ipcRenderer, 'myCustomApi');
 
 ```typescript
 const ipc = createReactIpc<AppRouter>('electronIpc', {
-  batching: true,          // Enable request batching (default: true)
-  batchingTimeout: 10,     // ms before flushing batch (default: 10)
+  batching: true,                 // Enable request batching (default: true)
+  batchingTimeout: 10,            // ms before flushing batch (default: 10)
+  legacyUnscopedPayloads: false,  // Accept payloads without __subId (default: false)
 });
 ```
 
@@ -790,7 +800,7 @@ test('getUser returns user profile', async () => {
 From the **repo root**:
 
 ```bash
-npm test              # Vitest: library unit tests + browser mock harness (49 tests)
+npm test              # Vitest: library unit tests + browser mock harness (55 tests)
 npm run test:harness  # Harness only (jsdom + mocked preload bridge)
 npm run test:e2e      # Build library + example, then Playwright Electron (9 specs)
 ```
