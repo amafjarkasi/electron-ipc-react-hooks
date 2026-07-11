@@ -62,18 +62,24 @@ export function createReactIpcStore<T extends Record<string, any>>(storeName: st
   return function useIpcStore(): [T, (updates: Partial<T> | ((prev: T) => Partial<T>)) => void, () => void] {
     const api = (window as any)[apiKey];
     const [state, setState] = useState<T>(initialState);
+    const stateRef = useRef(state);
+    stateRef.current = state;
 
     useEffect(() => {
       if (!api) return;
 
       // Fetch actual state from main process
       api.invoke(`__ipc_store_${storeName}_get`).then((s: T) => {
-        if (s) setState(s);
+        if (s) {
+          stateRef.current = s;
+          setState(s);
+        }
       }).catch(() => {
         // Main process store not available — keep initial state
       });
 
       const listener = (_event: any, newState: T) => {
+        stateRef.current = newState;
         setState(newState);
       };
 
@@ -87,24 +93,29 @@ export function createReactIpcStore<T extends Record<string, any>>(storeName: st
 
     const updateState = useCallback((updates: Partial<T> | ((prev: T) => Partial<T>)) => {
       if (!api) return;
-      setState((prev) => {
-        const nextUpdates = typeof updates === 'function' ? (updates as any)(prev) : updates;
-        const nextState = { ...prev, ...nextUpdates };
-        // Fire-and-forget with error rollback
-        api.invoke(`__ipc_store_${storeName}_set`, nextUpdates).catch(() => {
-          // Roll back to server state on failure
-          api.invoke(`__ipc_store_${storeName}_get`).then((s: T) => {
-            if (s) setState(s);
-          });
+      const prev = stateRef.current;
+      const nextUpdates = typeof updates === 'function' ? (updates as any)(prev) : updates;
+      const nextState = { ...prev, ...nextUpdates };
+      stateRef.current = nextState;
+      setState(nextState);
+      // Fire-and-forget with error rollback (outside setState to avoid StrictMode double-invoke)
+      api.invoke(`__ipc_store_${storeName}_set`, nextUpdates).catch(() => {
+        api.invoke(`__ipc_store_${storeName}_get`).then((s: T) => {
+          if (s) {
+            stateRef.current = s;
+            setState(s);
+          }
         });
-        return nextState;
       });
     }, [api]);
 
     const resetState = useCallback(() => {
       if (!api) return;
       api.invoke(`__ipc_store_${storeName}_reset`).then((s: T) => {
-        if (s) setState(s);
+        if (s) {
+          stateRef.current = s;
+          setState(s);
+        }
       });
     }, [api]);
 
@@ -155,13 +166,13 @@ export type ReactIpcClient<TRouter extends RendererAnyRouter> = {
             ? {
                 useSubscription: (
                   input?: TRouter[K]['_input'],
-                  options?: { onData: (data: TRouter[K]['_output']) => void }
+                  options?: { onData: (data: TRouter[K]['_output']) => void; onError?: (error: IpcTypedError) => void }
                 ) => void;
               }
             : {
                 useSubscription: (
                   input: TRouter[K]['_input'],
-                  options: { onData: (data: TRouter[K]['_output']) => void }
+                  options: { onData: (data: TRouter[K]['_output']) => void; onError?: (error: IpcTypedError) => void }
                 ) => void;
               })
         : TRouter[K]['_type'] extends 'channel'
@@ -169,13 +180,13 @@ export type ReactIpcClient<TRouter extends RendererAnyRouter> = {
             ? {
                 useChannel: (
                   input?: TRouter[K]['_input'],
-                  options?: { onData?: (data: TRouter[K]['_output']) => void }
+                  options?: { onData?: (data: TRouter[K]['_output']) => void; onError?: (error: IpcTypedError) => void }
                 ) => { send: (data: any) => void };
               }
             : {
                 useChannel: (
                   input: TRouter[K]['_input'],
-                  options?: { onData?: (data: TRouter[K]['_output']) => void }
+                  options?: { onData?: (data: TRouter[K]['_output']) => void; onError?: (error: IpcTypedError) => void }
                 ) => { send: (data: any) => void };
               })
         : never)
@@ -191,10 +202,8 @@ export type ReactIpcClient<TRouter extends RendererAnyRouter> = {
  * @param apiKey - The window property name where the IPC API is exposed.
  */
 export function useIpcInvalidator(queryClient: QueryClient, apiKey = 'electronIpc') {
-  const apiRef = useRef((window as any)[apiKey]);
-
   useEffect(() => {
-    const api = apiRef.current;
+    const api = (window as any)[apiKey];
     if (!api) return;
 
     const listener = (_event: any, queryKey: string) => {
@@ -207,7 +216,7 @@ export function useIpcInvalidator(queryClient: QueryClient, apiKey = 'electronIp
         api.off('__ipc_invalidate', listener);
       };
     }
-  }, [queryClient]);
+  }, [queryClient, apiKey]);
 }
 
 /**
@@ -230,24 +239,40 @@ export function createReactIpc<TRouter extends RendererAnyRouter>(
     batchQueue = [];
     batchTimer = null;
 
+    const settleOne = (req: typeof queueToProcess[number], res: any) => {
+      if (res == null) {
+        req.reject(new Error(`Batch IPC missing result for ${req.channel}`));
+      } else if (res.error) {
+        req.reject(createIpcErrorFromResponse(res));
+      } else {
+        req.resolve(res.data);
+      }
+    };
+
+    const fallbackIndividual = async () => {
+      await Promise.all(queueToProcess.map(async (req) => {
+        try {
+          const res = await api.invoke(req.channel, req.input, req.invokeId);
+          settleOne(req, res);
+        } catch (err) {
+          req.reject(err);
+        }
+      }));
+    };
+
     const batchPayload = queueToProcess.map(req => ({ channel: req.channel, input: req.input, invokeId: req.invokeId }));
-    
+
     api.invoke('__ipc_batch', batchPayload).then((batchResults: any[]) => {
       if (!Array.isArray(batchResults)) {
-        // Fallback in case main process is an older version or doesn't support batching
-        queueToProcess.forEach(req => req.reject(new Error('Batch IPC failed: Main process did not return an array')));
-        return;
+        // Older main or unexpected shape — isolate via individual invokes
+        return fallbackIndividual();
       }
       queueToProcess.forEach((req, index) => {
-        const res = batchResults[index];
-        if (res && res.error) {
-          req.reject(createIpcErrorFromResponse(res));
-        } else {
-          req.resolve(res ? res.data : undefined);
-        }
+        settleOne(req, batchResults[index]);
       });
-    }).catch((e: any) => {
-      queueToProcess.forEach(req => req.reject(e));
+    }).catch(() => {
+      // Transport-level batch failure — retry each request independently
+      return fallbackIndividual();
     });
   };
 
@@ -354,27 +379,33 @@ export function createReactIpc<TRouter extends RendererAnyRouter>(
         }
 
         if (prop === 'useSubscription') {
-          return (input: any, subOptions?: { onData: (data: any) => void }) => {
+          return (input: any, subOptions?: { onData: (data: any) => void; onError?: (error: IpcTypedError) => void }) => {
             const api = (window as any)[apiKey];
             if (!api) throw new Error(`Could not find window.${apiKey}`);
             const channel = path.join('.');
-            // Stable serialization of input for effect dependencies
             const inputKey = useMemo(() => JSON.stringify(input), [input]);
+            const onDataRef = useRef(subOptions?.onData);
+            const onErrorRef = useRef(subOptions?.onError);
+            onDataRef.current = subOptions?.onData;
+            onErrorRef.current = subOptions?.onError;
 
             useEffect(() => {
               const subId = generateId();
 
               const listener = (_event: any, data: any) => {
                 if (data && typeof data === 'object' && data.__subId === subId) {
-                  subOptions?.onData?.(data.payload);
+                  if (data.__error) {
+                    onErrorRef.current?.(createIpcErrorFromResponse(data.__error));
+                    return;
+                  }
+                  onDataRef.current?.(data.payload);
                 } else if (data && data.__subId === undefined) {
                   // Legacy fallback if the main process didn't wrap the payload
-                  subOptions?.onData?.(data);
+                  onDataRef.current?.(data);
                 }
               };
 
               api.on(channel, listener);
-              // Trigger the subscription on the main process
               if (api.send) {
                 api.send(channel, { __action: 'subscribe', __subId: subId, input });
               }
@@ -390,20 +421,28 @@ export function createReactIpc<TRouter extends RendererAnyRouter>(
         }
 
         if (prop === 'useChannel') {
-          return (input: any, channelOptions?: { onData?: (data: any) => void }) => {
+          return (input: any, channelOptions?: { onData?: (data: any) => void; onError?: (error: IpcTypedError) => void }) => {
             const api = (window as any)[apiKey];
             if (!api) throw new Error(`Could not find window.${apiKey}`);
             const channel = path.join('.');
-            
+
             const [subId] = useState(() => generateId());
             const inputKey = useMemo(() => JSON.stringify(input), [input]);
+            const onDataRef = useRef(channelOptions?.onData);
+            const onErrorRef = useRef(channelOptions?.onError);
+            onDataRef.current = channelOptions?.onData;
+            onErrorRef.current = channelOptions?.onError;
 
             useEffect(() => {
               const listener = (_event: any, data: any) => {
                 if (data && typeof data === 'object' && data.__subId === subId) {
-                  channelOptions?.onData?.(data.payload);
+                  if (data.__error) {
+                    onErrorRef.current?.(createIpcErrorFromResponse(data.__error));
+                    return;
+                  }
+                  onDataRef.current?.(data.payload);
                 } else if (data && data.__subId === undefined) {
-                  channelOptions?.onData?.(data);
+                  onDataRef.current?.(data);
                 }
               };
 

@@ -252,3 +252,283 @@ test('batch IPC requests', async () => {
   ]);
 });
 
+test('batch IPC resolves nested router procedures', async () => {
+  const t = initIpc();
+  const systemRouter = t.router({
+    getInfo: t.procedure.query(() => ({ platform: 'test' })),
+  });
+  const appRouter = t.router({
+    system: systemRouter,
+    rootPing: t.procedure.query(() => 'pong'),
+  });
+
+  const mockIpcMain = {
+    handle: vi.fn(),
+    on: vi.fn(),
+    removeHandler: vi.fn(),
+    removeListener: vi.fn(),
+  } as any;
+
+  bindIpcRouter(mockIpcMain, appRouter);
+  const batchHandler = mockIpcMain.handle.mock.calls.find((c: any) => c[0] === '__ipc_batch')[1];
+
+  const res = await batchHandler({} as any, [
+    { channel: 'system.getInfo', input: undefined, invokeId: 'n1' },
+    { channel: 'rootPing', input: undefined, invokeId: 'n2' },
+  ]);
+
+  expect(res).toEqual([
+    { data: { platform: 'test' } },
+    { data: 'pong' },
+  ]);
+});
+
+test('nested router dispose removes nested handlers', async () => {
+  const t = initIpc();
+  const appRouter = t.router({
+    system: t.router({
+      getInfo: t.procedure.query(() => 'ok'),
+    }),
+    ping: t.procedure.query(() => 'pong'),
+  });
+
+  const mockIpcMain = {
+    handle: vi.fn(),
+    on: vi.fn(),
+    removeHandler: vi.fn(),
+    removeListener: vi.fn(),
+  } as any;
+
+  const dispose = bindIpcRouter(mockIpcMain, appRouter);
+  dispose();
+
+  expect(mockIpcMain.removeHandler).toHaveBeenCalledWith('__ipc_batch');
+  expect(mockIpcMain.removeHandler).toHaveBeenCalledWith('ping');
+  expect(mockIpcMain.removeHandler).toHaveBeenCalledWith('system.getInfo');
+});
+
+test('bindIpcStore dispose unsubscribes broadcast', async () => {
+  const store = createIpcStore({ theme: 'dark' });
+  const mockIpcMain = {
+    handle: vi.fn(),
+    removeHandler: vi.fn(),
+  } as any;
+
+  let sendCount = 0;
+  const mockWebContents = {
+    getAllWebContents: () => [
+      { send: () => { sendCount++; } },
+    ],
+  };
+
+  const dispose = bindIpcStore(mockIpcMain, 'settings', store, { webContents: mockWebContents as any });
+  store.set({ theme: 'light' });
+  expect(sendCount).toBe(1);
+
+  dispose();
+  store.set({ theme: 'dark' });
+  expect(sendCount).toBe(1);
+});
+
+test('subscription cleanup on unsubscribe', async () => {
+  const t = initIpc();
+  let cleaned = false;
+  const appRouter = t.router({
+    clock: t.procedure.subscription(({ emit }) => {
+      const id = setInterval(() => emit('tick'), 10);
+      return () => {
+        clearInterval(id);
+        cleaned = true;
+      };
+    }),
+  });
+
+  const listeners = new Map<string, Array<(...args: any[]) => void>>();
+  const mockIpcMain = {
+    handle: vi.fn(),
+    on: vi.fn((channel: string, handler: (...args: any[]) => void) => {
+      if (!listeners.has(channel)) listeners.set(channel, []);
+      listeners.get(channel)!.push(handler);
+    }),
+    removeHandler: vi.fn(),
+    removeListener: vi.fn(),
+  } as any;
+
+  const sender = {
+    isDestroyed: () => false,
+    send: vi.fn(),
+    once: vi.fn(),
+    removeListener: vi.fn(),
+  };
+
+  bindIpcRouter(mockIpcMain, appRouter);
+  const subHandler = listeners.get('clock')![0];
+
+  await subHandler({ sender }, { __action: 'subscribe', __subId: 's1', input: undefined });
+  await subHandler({ sender }, { __action: 'unsubscribe', __subId: 's1' });
+
+  expect(cleaned).toBe(true);
+});
+
+test('channel send round-trip', async () => {
+  const t = initIpc();
+  const received: any[] = [];
+  const appRouter = t.router({
+    stream: t.procedure.channel(({ emit, onData }) => {
+      onData((data) => {
+        received.push(data);
+        emit({ ack: data });
+      });
+      return () => {};
+    }),
+  });
+
+  const listeners = new Map<string, Array<(...args: any[]) => void>>();
+  const mockIpcMain = {
+    handle: vi.fn(),
+    on: vi.fn((channel: string, handler: (...args: any[]) => void) => {
+      if (!listeners.has(channel)) listeners.set(channel, []);
+      listeners.get(channel)!.push(handler);
+    }),
+    removeHandler: vi.fn(),
+    removeListener: vi.fn(),
+  } as any;
+
+  const sent: any[] = [];
+  const sender = {
+    isDestroyed: () => false,
+    send: (_ch: string, payload: any) => sent.push(payload),
+    once: vi.fn(),
+    removeListener: vi.fn(),
+  };
+
+  bindIpcRouter(mockIpcMain, appRouter);
+  const handler = listeners.get('stream')![0];
+
+  await handler({ sender }, { __action: 'subscribe', __subId: 'c1', input: undefined });
+  await handler({ sender }, { __action: 'send', __subId: 'c1', data: { bytes: 10 } });
+
+  expect(received).toEqual([{ bytes: 10 }]);
+  expect(sent).toEqual([{ __subId: 'c1', payload: { ack: { bytes: 10 } } }]);
+});
+
+test('subscription setup errors are sent to renderer as __error', async () => {
+  const t = initIpc();
+  const appRouter = t.router({
+    clock: t.procedure.subscription(() => {
+      throw new IpcError('No clock', 'NO_CLOCK', { reason: 'missing' });
+    }),
+  });
+
+  const listeners = new Map<string, Array<(...args: any[]) => void>>();
+  const mockIpcMain = {
+    handle: vi.fn(),
+    on: vi.fn((channel: string, handler: (...args: any[]) => void) => {
+      if (!listeners.has(channel)) listeners.set(channel, []);
+      listeners.get(channel)!.push(handler);
+    }),
+    removeHandler: vi.fn(),
+    removeListener: vi.fn(),
+  } as any;
+
+  const sent: any[] = [];
+  const sender = {
+    isDestroyed: () => false,
+    send: (_ch: string, payload: any) => sent.push(payload),
+    once: vi.fn(),
+    removeListener: vi.fn(),
+  };
+
+  const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+  bindIpcRouter(mockIpcMain, appRouter);
+  const subHandler = listeners.get('clock')![0];
+
+  await subHandler({ sender }, { __action: 'subscribe', __subId: 's-err', input: undefined });
+
+  expect(sent).toEqual([
+    {
+      __subId: 's-err',
+      __error: { error: 'No clock', code: 'NO_CLOCK', data: { reason: 'missing' } },
+    },
+  ]);
+  consoleSpy.mockRestore();
+});
+
+test('re-binding router without dispose does not duplicate subscription listeners', async () => {
+  const t = initIpc();
+  let subscribeCount = 0;
+  const appRouter = t.router({
+    clock: t.procedure.subscription(() => {
+      subscribeCount++;
+      return () => {};
+    }),
+  });
+
+  const listeners = new Map<string, Array<(...args: any[]) => void>>();
+  const mockIpcMain = {
+    handle: vi.fn(),
+    on: vi.fn((channel: string, handler: (...args: any[]) => void) => {
+      if (!listeners.has(channel)) listeners.set(channel, []);
+      listeners.get(channel)!.push(handler);
+    }),
+    removeHandler: vi.fn(),
+    removeListener: vi.fn(),
+    removeAllListeners: vi.fn((channel: string) => {
+      listeners.set(channel, []);
+    }),
+  } as any;
+
+  const sender = {
+    isDestroyed: () => false,
+    send: vi.fn(),
+    once: vi.fn(),
+    removeListener: vi.fn(),
+  };
+
+  bindIpcRouter(mockIpcMain, appRouter);
+  bindIpcRouter(mockIpcMain, appRouter);
+
+  expect(mockIpcMain.removeAllListeners).toHaveBeenCalledWith('clock');
+  expect(listeners.get('clock')).toHaveLength(1);
+
+  await listeners.get('clock')![0]({ sender }, { __action: 'subscribe', __subId: 's1', input: undefined });
+  expect(subscribeCount).toBe(1);
+});
+
+test('warns in development when subscription omits cleanup return', async () => {
+  const t = initIpc();
+  const appRouter = t.router({
+    clock: t.procedure.subscription(() => {
+      // intentionally no cleanup
+    }),
+  });
+
+  const listeners = new Map<string, Array<(...args: any[]) => void>>();
+  const mockIpcMain = {
+    handle: vi.fn(),
+    on: vi.fn((channel: string, handler: (...args: any[]) => void) => {
+      if (!listeners.has(channel)) listeners.set(channel, []);
+      listeners.get(channel)!.push(handler);
+    }),
+    removeHandler: vi.fn(),
+    removeListener: vi.fn(),
+    removeAllListeners: vi.fn(),
+  } as any;
+
+  const sender = {
+    isDestroyed: () => false,
+    send: vi.fn(),
+    once: vi.fn(),
+    removeListener: vi.fn(),
+  };
+
+  const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+  bindIpcRouter(mockIpcMain, appRouter);
+  await listeners.get('clock')![0]({ sender }, { __action: 'subscribe', __subId: 's1', input: undefined });
+
+  expect(warnSpy).toHaveBeenCalledWith(
+    expect.stringContaining('subscription "clock" did not return a cleanup function')
+  );
+  warnSpy.mockRestore();
+});
+

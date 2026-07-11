@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, dialog } from 'electron'
+import { app, BrowserWindow, ipcMain, dialog, webContents } from 'electron'
 import { join, basename } from 'path'
 import * as os from 'os'
 import * as fs from 'fs/promises'
@@ -44,6 +44,15 @@ const systemRouter = t.router({
   })),
 
   openFileDialog: protectedProcedure.mutation(async ({ ctx }) => {
+    if (process.env.E2E === '1') {
+      return {
+        path: '/e2e/stub.txt',
+        name: 'stub.txt',
+        size: 42,
+        created: new Date().toISOString(),
+      };
+    }
+
     const window = BrowserWindow.fromWebContents(ctx.event.sender);
     if (!window) throw new IpcError('No window found', 'NOT_FOUND');
 
@@ -109,6 +118,9 @@ const systemRouter = t.router({
   showNotification: protectedProcedure
     .input(z.object({ title: z.string(), body: z.string() }))
     .mutation(({ input }) => {
+      if (process.env.E2E === '1') {
+        return { shown: true, title: input.title, body: input.body };
+      }
       let Notif: any;
       try {
         Notif = require('electron').Notification;
@@ -268,15 +280,16 @@ function createWindow() {
 }
 
 app.whenReady().then(() => {
-  // Bind IPC router with context injection
+  // Bind IPC router with context injection + webContents for cross-window broadcasts
   bindIpcRouter(
     ipcMain, 
     appRouter, 
-    (event) => ({ event, timestamp: Date.now() })
+    (event) => ({ event, timestamp: Date.now() }),
+    { webContents }
   )
 
   // Bind store to broadcast state updates to all WebContents natively
-  bindIpcStore(ipcMain, 'settings', settingsStore)
+  bindIpcStore(ipcMain, 'settings', settingsStore, { webContents })
 
   createWindow()
 })

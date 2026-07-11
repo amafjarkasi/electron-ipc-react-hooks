@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="./.github/assets/hero-v2.png" alt="electron-ipc-react-hooks hero graphic" width="100%">
+  <img src="./.github/assets/hero-v4.svg" alt="electron-ipc-react-hooks — type-safe Electron IPC with React Query hooks" width="100%">
 
   <br />
   <br />
@@ -8,15 +8,15 @@
   [![License](https://img.shields.io/npm/l/electron-ipc-react-hooks?style=for-the-badge&color=7C4DFF)](https://opensource.org/licenses/MIT)
   [![TypeScript](https://img.shields.io/badge/TypeScript-Strict-3178C6?style=for-the-badge&logo=typescript)](https://www.typescriptlang.org/)
   [![tRPC Inspired](https://img.shields.io/badge/tRPC-Inspired-2596be?style=for-the-badge&logo=trpc)](https://trpc.io)
-  [![Tests](https://img.shields.io/badge/Tests-35%20passing-4FC3F7?style=for-the-badge&logo=vitest)](https://vitest.dev/)
+  [![Tests](https://img.shields.io/badge/Tests-49%20passing-4FC3F7?style=for-the-badge&logo=vitest)](https://vitest.dev/)
 
   <br />
 
   <p>
-    <b>🧬 End-to-end type safety without code generation.</b><br/>
-    <b>⚡ TanStack React Query — native.</b><br/>
-    <b>🔒 Zod validation at the IPC boundary.</b><br/>
-    <b>📦 26KB total — zero external deps.</b>
+    <b>End-to-end type safety without code generation.</b><br/>
+    <b>TanStack React Query — native.</b><br/>
+    <b>Zod validation at the IPC boundary.</b><br/>
+    <b>~37KB ESM - no runtime dependencies (React, React Query, Zod are peers).</b>
   </p>
 </div>
 
@@ -24,7 +24,26 @@
 
 > ### *"The Electron IPC layer you wished Electron shipped with."*
 >
-> Define a router in Main. Import its **type** in Renderer. Call `ipc.getUser.useQuery('email')` — and get back `{ data, isLoading, error }` powered by TanStack React Query. Your router types flow through the preload bridge automatically. **No code gen. No `any`. No compromise.**
+> Define a router in Main. Import its **type** in Renderer. Call `ipc.getUser.useQuery('email')` — and get back `{ data, isLoading, error }` powered by TanStack React Query. Your router types flow through the preload bridge automatically. **No code gen. No compromise.**
+
+---
+
+## What's new in 1.3.1
+
+Recent correctness and DX fixes (see [`docs/REVIEW.md`](./docs/REVIEW.md) for the full review):
+
+| Area | Change |
+|---|---|
+| **Nested routers** | `__ipc_batch` resolves nested paths (e.g. `system.getInfo`); root `dispose()` tears down nested handlers |
+| **Cross-window sync** | Pass `{ webContents }` into `bindIpcRouter` / `bindIpcStore` so `broadcast.invalidate` and store updates reach all windows |
+| **Shared store** | Store updates no longer double-fire under React StrictMode; dispose unsubscribes the broadcast listener |
+| **Types** | Procedure builders preserve literal `_type`, so renderer hooks infer correctly (no collapsed union) |
+| **Subscriptions** | Latest `onData` / `onError` always used (refs); main failures surface via `{ __error }` → `onError` |
+| **Batching** | Transport failure of `__ipc_batch` falls back to individual invokes; per-item errors stay isolated |
+| **Re-bind / HMR** | `bindIpcRouter` clears prior handlers/listeners before registering (safe without dispose) |
+| **Cleanup warn** | Dev warning when a subscription/channel omits its cleanup return |
+| **Tests** | Vitest (unit + browser mock harness) + Playwright Electron E2E against `/example` |
+| **CI** | GitHub Actions runs unit/harness on PRs; E2E on Ubuntu with xvfb |
 
 ---
 
@@ -33,15 +52,16 @@
 ### Install dependencies
 
 ```bash
-npm install electron-ipc-react-hooks zod @tanstack/react-query
+npm install electron-ipc-react-hooks zod @tanstack/react-query react react-dom
 npm install -D typescript
 ```
 
 **What each package does:**
-- `electron-ipc-react-hooks` — The library itself. Provides the router builder, React hooks, preload bridge, error classes, rate limiter, DevTools, and shared state store. Zero external dependencies — it only uses React and Zod as peer dependencies.
-- `zod` — Schema validation library. You define schemas for your procedure inputs (e.g., "email must be a valid email", "name must be at least 1 character"). These schemas run at the IPC boundary in the main process, rejecting malformed data before it reaches your handlers. TypeScript infers types from the same schemas, so you get both runtime validation and compile-time type safety from a single source of truth.
-- `@tanstack/react-query` — The data-fetching library that powers `useQuery` and `useMutation` under the hood. It handles caching, background refetching, stale-while-revalidate, pagination, optimistic updates, and much more. This library integrates with it natively — every `.query()` becomes a `useQuery`, every `.mutation()` becomes a `useMutation`.
-- `typescript` — Required for the type magic. The router you define in main is a TypeScript type that flows to the renderer through `typeof appRouter`. Without TypeScript, you still get runtime validation from Zod, but you lose the auto-complete and compile-time error checking that makes this library powerful.
+- `electron-ipc-react-hooks` — Router builder, React hooks, preload bridge, errors, rate limiter, DevTools helper, and shared store. **No runtime `dependencies`** — peers only.
+- `zod` — Input schemas at the IPC boundary (runtime validation + TypeScript inference).
+- `@tanstack/react-query` — Powers `useQuery` / `useMutation` / `useInfiniteQuery` (caching, retries, invalidation).
+- `typescript` — Required for end-to-end types via `typeof appRouter`. Without it you still get Zod validation at runtime.
+- `react` / `react-dom` — Peer dependencies for the renderer hooks.
 
 ---
 
@@ -51,8 +71,8 @@ The "main" process is Electron's Node.js backend — it has full access to the f
 
 ```typescript
 // main.ts
-import { initIpc, bindIpcRouter } from 'electron-ipc-react-hooks';
-import { ipcMain } from 'electron';
+import { initIpc, bindIpcRouter } from 'electron-ipc-react-hooks/main';
+import { ipcMain, webContents } from 'electron';
 import { z } from 'zod';
 
 // Create an IPC builder — this is the foundation for building typed procedures
@@ -60,41 +80,45 @@ const t = initIpc();
 
 // Define your router — a collection of procedures the renderer can call
 const appRouter = t.router({
-  // 📖 Query — read/fetch data from the main process
-  // The renderer calls this like a React Query hook
+  // Query — read/fetch data from the main process
   getUser: t.procedure
-    .input(z.string().email())     // Validate: input must be a valid email
-    .query(async ({ input }) => {   // .query = read-only data fetch
+    .input(z.string().email())
+    .query(async ({ input }) => {
       const user = await db.users.findByEmail(input);
       return { id: user.uuid, name: user.displayName, avatar: user.avatarUrl };
     }),
 
-  // ✏️ Mutation — create/update/delete data in the main process
-  // The renderer calls this to trigger state changes
+  // Mutation — create/update/delete data in the main process
   saveProfile: t.procedure
     .input(z.object({ name: z.string().min(1), avatar: z.string().url() }))
-    .mutation(async ({ input }) => { // .mutation = state-changing action
+    .mutation(async ({ input, broadcast }) => {
       await db.users.updateProfile(input);
+      // Refresh caches in every open window (requires webContents below)
+      broadcast.invalidate('getUser');
       return { success: true };
     }),
 });
 
-// 🔒 Export ONLY the TypeScript type — NOT the runtime router.
-// This prevents Node.js modules (fs, net, child_process) from leaking into the renderer.
-// The renderer imports this type to get auto-complete and type checking.
+// Export ONLY the TypeScript type — NOT the runtime router.
 export type AppRouter = typeof appRouter;
 
-// Bind the router to Electron's ipcMain — this registers IPC handlers for every procedure.
-// It returns a dispose function you can call to clean up (useful for tests and HMR).
-const dispose = bindIpcRouter(ipcMain, appRouter);
+// Bind the router. Pass { webContents } so invalidate / multi-window features work.
+// Returns a dispose function (tests, HMR, window teardown).
+const dispose = bindIpcRouter(
+  ipcMain,
+  appRouter,
+  (event) => ({ event }),
+  { webContents }
+);
 ```
 
 **What's happening here:**
-1. `initIpc()` creates a typed builder. Think of it like `new tRPC()` — it's the starting point.
-2. `t.procedure.input(schema).query(handler)` creates a single IPC endpoint. The Zod schema validates input at runtime AND provides the TypeScript type at compile time.
-3. `t.router({ ... })` collects all procedures into a single object. This becomes your API surface.
-4. `bindIpcRouter(ipcMain, appRouter)` connects your router to Electron. It registers `ipcMain.handle('ipc:invoke', ...)` internally. You never deal with channel names.
-5. `export type AppRouter` exports only the TypeScript shape — no runtime code. The renderer will import this type to know what procedures exist and what their signatures are.
+1. `initIpc()` creates a typed builder (similar spirit to tRPC).
+2. `t.procedure.input(schema).query(handler)` creates one IPC endpoint. Zod validates at runtime and drives TypeScript types.
+3. `t.router({ ... })` is your API surface (supports nested sub-routers).
+4. `bindIpcRouter` registers `ipcMain.handle` for each query/mutation path (e.g. `getUser`, `system.getInfo`) plus a shared `__ipc_batch` handler. Nested paths are included in batching and in `dispose()`.
+5. `export type AppRouter` exports only the type — keep Node-only code out of the renderer.
+6. **`{ webContents }` is required** for `broadcast.invalidate(...)` and for `bindIpcStore` multi-window sync. Without it, those broadcasts are no-ops.
 
 ---
 
@@ -337,10 +361,12 @@ const protectedProc = t.procedure.use(auditLog).use(requireAuth).use(rateLimit);
 
 ```typescript
 // Context factory — runs on EVERY IPC call
+import { ipcMain, webContents } from 'electron';
+
 bindIpcRouter(ipcMain, appRouter, async (event) => {
   const session = await resolveSession(event);
   return { userId: session.userId, db: getDatabase(), isAdmin: session.role === 'admin' };
-});
+}, { webContents });
 ```
 
 > **🗣️ In plain English:** Every time the renderer calls an IPC function, a "context" object is automatically created with the current user's info, database connection, and anything else the handler needs. The handler just uses what's in the context — it doesn't care where it came from. This makes your code easier to test (just pass a fake context) and harder to break (no hidden global dependencies).
@@ -377,9 +403,14 @@ bindIpcRouter(ipcMain, appRouter, async (event) => {
 ```tsx
 ipc.onFileProgress.useSubscription({ fileId }, {
   onData: (update) => setProgress(update.percent),
+  onError: (err) => console.error(err.code, err.message),
 });
 // Auto-cleanup when component unmounts!
 ```
+
+> **Main-process tip:** Always return a cleanup function from `.subscription()` / `.channel()` resolvers (e.g. `clearInterval`). If you omit it, unsubscribe cannot stop server-side work.
+>
+> `onData` / `onError` may change every render — the hooks keep the latest callbacks via refs without resubscribing.
 
 > **🗣️ In plain English:** The main process can push updates to your React component whenever something happens — a download progresses, a notification arrives, a build step completes. Your component just says "I want to know about X" and gets called every time X happens. When the component disappears, the subscription automatically stops.
 
@@ -442,7 +473,7 @@ send({ row: parsedRow, totalRows: 1000 }); // Send TO main
 
 ### 12. ⚡ Request Batching (Enabled by Default)
 
-**What it is:** When a React component renders and triggers multiple queries at the same time (e.g., a dashboard that loads user info, organization data, and statistics simultaneously), the library automatically collects all those queries and sends them in a single IPC call instead of making separate calls for each one. This works by queueing queries in a microtask queue and flushing them together after a configurable timeout (default: 10ms). The main process handles each procedure individually and returns all results together. Each hook receives its own result transparently — no code changes needed. This significantly reduces Electron bridge overhead, which is the most expensive part of IPC communication.
+**What it is:** When a React component renders and triggers multiple queries at the same time (e.g., a dashboard that loads user info, organization data, and statistics simultaneously), the library automatically collects those queries and sends them in a single `__ipc_batch` IPC call. Queries are queued briefly (default **10ms**) then flushed together. Nested procedure paths (e.g. `system.getInfo`) are included in the batch registry. Mutations are never batched. Each hook still receives its own result transparently.
 
 **🎯 Real-World Scenarios:**
 - **Dashboards** — Load user + org + stats + notifications in one batch instead of 4 separate IPC calls.
@@ -474,7 +505,16 @@ function Dashboard() {
 - **Admin + User views** — Admin bans a user → user's window shows "Account suspended" immediately.
 - **Multi-monitor setups** — Different BrowserWindows showing different views of the same data.
 
-**⚡ Improvement over vanilla Electron:** Vanilla IPC has no built-in cache synchronization. You'd manually send invalidation messages via `webContents.send()` and handle them in each window. This requires tracking which windows exist, which queries they're running, and wiring up listeners. This library handles all of it — just call `broadcast.invalidate('queryName')` in your mutation handler.
+**⚡ Improvement over vanilla Electron:** Vanilla IPC has no built-in cache synchronization. You'd manually send invalidation messages via `webContents.send()` and handle them in each window. This library handles the fan-out — call `broadcast.invalidate('queryName')` in your mutation handler and mount `useIpcInvalidator(queryClient)` in each window.
+
+> **Important:** Pass Electron's `webContents` module when binding:
+>
+> ```typescript
+> import { ipcMain, webContents } from 'electron';
+> bindIpcRouter(ipcMain, appRouter, createContext, { webContents });
+> ```
+>
+> Without `{ webContents }`, `broadcast.invalidate` is a no-op.
 
 > **🗣️ In plain English:** When you change data in one window (like marking all notifications as read), all other windows automatically know and refresh their data. It's like changing the TV channel in one room and having every other TV in the house update too.
 
@@ -490,13 +530,24 @@ function Dashboard() {
 - **User session** — `activeUserId`, `isLoggedIn`, `permissions[]` — shared state accessible everywhere.
 - **Recent files list** — Updated from any window, visible in all others.
 
-**⚡ Improvement over vanilla Electron:** Vanilla approach: store state in main, send to renderers via `webContents.send()`, each renderer manages its own copy, manually sync on changes. Inconsistent state is common. This library gives you a single source of truth with automatic synchronization and React hooks.
+**⚡ Improvement over vanilla Electron:** Vanilla approach: store state in main, send to renderers via `webContents.send()`, each renderer manages its own copy, manually sync on changes. This library gives you a single source of truth with automatic synchronization and React hooks.
+
+```typescript
+// Main
+import { createIpcStore, bindIpcStore } from 'electron-ipc-react-hooks/main';
+import { ipcMain, webContents } from 'electron';
+
+const settingsStore = createIpcStore({ theme: 'system', notifications: true });
+bindIpcStore(ipcMain, 'settings', settingsStore, { webContents });
+```
 
 ```tsx
 // Renderer — just use the hook, state syncs automatically
-const [state, setState] = useAppStore();
-setState({ theme: 'dark' }); // Updates main + all other windows
+const [state, setState, resetState] = useAppStore();
+setState({ theme: 'dark' }); // Updates main + all other windows (when webContents is bound)
 ```
+
+> **Important:** Like invalidation, multi-window store sync requires `{ webContents }` on `bindIpcStore`. Store updates are StrictMode-safe (IPC is not fired from inside a `setState` updater).
 
 > **🗣️ In plain English:** There's one shared settings object that lives in the main process. Any window can read or change it, and the change instantly appears in every other window. It's like a shared whiteboard — anyone can write, everyone sees the latest version.
 
@@ -536,7 +587,9 @@ setState({ theme: 'dark' }); // Updates main + all other windows
 
 ### 17. 🔬 DevTools (`createDevTools`)
 
-**What it is:** An observability and debugging layer that records every IPC call your app makes. It captures the procedure path, input data, duration, success/failure status, and error details for each call. You can query the history, get aggregated statistics (total calls, success rate, error rate, average duration, breakdown by procedure type), subscribe to real-time updates, and build a custom DevTools panel right inside your app. Enable/disable recording at runtime to capture specific scenarios. Set a max history size to control memory usage. It's like Chrome DevTools' Network tab, but for your IPC layer.
+**What it is:** An optional observability helper that records IPC call path, input, duration, and success/failure. You can query history, stats, and subscribe to updates to build an in-app panel.
+
+> **Not auto-wired.** `createDevTools()` does **not** hook into `bindIpcRouter` automatically. Call `recordCall` / `recordResponse` yourself (or wrap middleware) if you want traffic recorded. Concurrent calls to the same path should use unique IDs if you instrument manually — the helper currently keys pending calls by path.
 
 **🎯 Real-World Scenarios:**
 - **Performance profiling** — Find the slowest IPC calls. Is `searchDocuments` taking 2s? Optimize it.
@@ -552,7 +605,7 @@ setState({ theme: 'dark' }); // Updates main + all other windows
 
 ### 18. 🧹 Cleanup & Dispose
 
-**What it is:** Both `bindIpcRouter` and `bindIpcStore` return a dispose function. When you call it, all registered `ipcMain` handlers for that router or store are removed. This is essential for: (1) multi-window apps where each window has its own set of handlers — dispose when the window closes to prevent memory leaks and duplicate handlers; (2) testing — dispose between test cases so handlers from one test don't interfere with the next; (3) Hot Module Replacement — re-bind handlers on code change without restarting Electron; (4) dynamic plugin systems — load a plugin's router, then unload and clean up when the plugin is removed.
+**What it is:** Both `bindIpcRouter` and `bindIpcStore` return a dispose function. Calling it removes registered `ipcMain` handlers **and** nested-router handlers, abort listeners, and (for stores) the broadcast subscription. Use it for multi-window teardown, tests, HMR, and plugins.
 
 **🎯 Real-World Scenarios:**
 - **Multi-window apps** — Window closes → dispose its IPC handlers → no memory leaks.
@@ -563,7 +616,9 @@ setState({ theme: 'dark' }); // Updates main + all other windows
 **⚡ Improvement over vanilla Electron:** Vanilla `ipcMain.handle()` registers permanent listeners. There's no built-in way to remove specific handlers without keeping references to the original functions. If you re-register (HMR, tests), you get duplicate handlers causing double execution. This library returns a dispose function that cleans up everything.
 
 ```typescript
-const dispose = bindIpcRouter(ipcMain, appRouter, createContext);
+import { ipcMain, webContents } from 'electron';
+
+const dispose = bindIpcRouter(ipcMain, appRouter, createContext, { webContents });
 win.on('closed', () => dispose()); // Clean up on window close
 ```
 
@@ -575,11 +630,15 @@ win.on('closed', () => dispose()); // Clean up on window close
 
 ### Import Paths
 
+Prefer **subpath imports** so main/preload/renderer bundles stay isolated:
+
 ```typescript
-import { initIpc, bindIpcRouter } from 'electron-ipc-react-hooks';        // everything
-import { initIpc, bindIpcRouter } from 'electron-ipc-react-hooks/main';    // main process only
-import { exposeIpc } from 'electron-ipc-react-hooks/preload';              // preload only
-import { createReactIpc } from 'electron-ipc-react-hooks/renderer';        // renderer only
+import { initIpc, bindIpcRouter, bindIpcStore, createIpcStore, IpcError, createRateLimiter, createDevTools } from 'electron-ipc-react-hooks/main';
+import { exposeIpc } from 'electron-ipc-react-hooks/preload';
+import { createReactIpc, createReactIpcStore, useIpcInvalidator, IpcTypedError } from 'electron-ipc-react-hooks/renderer';
+
+// Root entry re-exports everything (fine for docs/tests; avoid pulling main into renderer bundles)
+import { initIpc } from 'electron-ipc-react-hooks';
 ```
 
 ### Main Process Exports
@@ -587,13 +646,13 @@ import { createReactIpc } from 'electron-ipc-react-hooks/renderer';        // re
 | Export | Signature | Purpose |
 |---|---|---|
 | `initIpc<TContext>()` | `() => { router, procedure, middleware }` | Create a typed IPC builder with your context type |
-| `bindIpcRouter` | `(ipcMain, router, contextFactory?) => () => void` | Bind router to Electron's ipcMain. Returns dispose. |
+| `bindIpcRouter` | `(ipcMain, router, createContext?, options?: { webContents }) => () => void` | Bind router (incl. nested). Pass `{ webContents }` for invalidate. Returns dispose. |
 | `createIpcStore` | `<T>(initialState: T) => { get, set, reset, subscribe }` | Create a shared reactive store |
-| `bindIpcStore` | `(ipcMain, storeName, store, options: { webContents }) => () => void` | Bind store to IPC. Returns dispose. |
+| `bindIpcStore` | `(ipcMain, storeName, store, options?: { webContents }) => () => void` | Bind store to IPC. Pass `{ webContents }` for multi-window sync. Returns dispose. |
 | `IpcError` | `class extends Error` | Structured error for Main → Renderer |
 | `ProcedureBuilder` | Class | Chainable: `.input()`, `.use()`, `.query()`, `.mutation()`, `.subscription()`, `.channel()` |
 | `createRateLimiter` | `(options) => Middleware` | Sliding-window rate limiting middleware |
-| `createDevTools` | `(options?) => IpcDevTools` | IPC traffic observability |
+| `createDevTools` | `(options?) => IpcDevTools` | Manual IPC traffic recorder (not auto-wired) |
 
 ### Procedure Builder Methods
 
@@ -612,22 +671,22 @@ t.procedure
 ### Handler Signatures
 
 ```typescript
-// .query() — read data, auto-canceled on unmount
-.query(async ({ input, ctx, signal, path, type, broadcast }) => { ... })
+// .query() — read data, auto-canceled on unmount via AbortSignal
+.query(async ({ input, ctx, signal, broadcast }) => { ... })
 
-// .mutation() — change data, broadcast invalidation
-.mutation(async ({ input, ctx, path, type, broadcast }) => { ... })
+// .mutation() — change data; use broadcast.invalidate for other windows
+.mutation(async ({ input, ctx, signal, broadcast }) => { ... })
 
-// .subscription() — push events to renderer
-.subscription(({ input, ctx, emit }) => {
-  emit(data);            // Push to renderer
-  return () => cleanup(); // Called on unmount
+// .subscription() — push events to renderer (return cleanup!)
+.subscription(({ input, ctx, emit, broadcast }) => {
+  emit(data);
+  return () => cleanup();
 })
 
-// .channel() — two-way data stream
-.channel(({ input, ctx, emit, onData }) => {
-  emit(data);            // Send TO renderer
-  onData((data) => {});  // Receive FROM renderer
+// .channel() — two-way data stream (return cleanup!)
+.channel(({ input, ctx, emit, onData, broadcast }) => {
+  emit(data);
+  onData((data) => {});
   return () => cleanup();
 })
 ```
@@ -678,11 +737,11 @@ const ipc = createReactIpc<AppRouter>('electronIpc', {
 
 | Procedure | Hook | Returns |
 |---|---|---|
-| `.query()` | `ipc.x.useQuery(input, options?)` | `{ data, isLoading, error, refetch, ... }` |
-| `.query()` | `ipc.x.useInfiniteQuery(input, options?)` | `{ data, fetchNextPage, hasNextPage, ... }` |
-| `.mutation()` | `ipc.x.useMutation(options?)` | `{ mutate, mutateAsync, isPending, error, ... }` |
-| `.subscription()` | `ipc.x.useSubscription(input, { onData, onError? })` | Auto-cleanup on unmount |
-| `.channel()` | `ipc.x.useChannel(input, { onData? })` | `{ send }` |
+| `.query()` | `ipc.x.useQuery(input, options?)` | React Query result (`data`, `isLoading`, `error`, …) |
+| `.query()` | `ipc.x.useInfiniteQuery(input, options?)` | Infinite query result (`fetchNextPage`, `hasNextPage`, …) |
+| `.mutation()` | `ipc.x.useMutation(options?)` | `{ mutate, mutateAsync, isPending, error, … }` |
+| `.subscription()` | `ipc.x.useSubscription(input, { onData, onError? })` | `void` (auto-cleanup on unmount) |
+| `.channel()` | `ipc.x.useChannel(input, { onData?, onError? })` | `{ send }` |
 
 ### Error Classes
 
@@ -707,9 +766,11 @@ function createIpcErrorFromResponse(response: { error: string; code?: string; da
 
 ---
 
-## 🧪 Testing
+## Testing
 
-Your router is a plain object — call procedures directly. No Electron needed.
+### Unit tests (no Electron binary)
+
+Procedures are plain functions — call them directly:
 
 ```typescript
 import { expect, test, vi } from 'vitest';
@@ -724,34 +785,51 @@ test('getUser returns user profile', async () => {
   });
   expect(result.name).toBe('Alice');
 });
-
-test('invalid email throws BAD_REQUEST', async () => {
-  try {
-    await appRouter.getUser({
-      input: 'not-an-email',
-      ctx: {},
-      path: 'getUser',
-      broadcast: { invalidate: vi.fn() },
-    });
-  } catch (e: any) {
-    expect(e.code).toBe('BAD_REQUEST');
-  }
-});
 ```
+
+From the **repo root**:
+
+```bash
+npm test              # Vitest: library unit tests + browser mock harness (49 tests)
+npm run test:harness  # Harness only (jsdom + mocked preload bridge)
+npm run test:e2e      # Build library + example, then Playwright Electron (9 specs)
+```
+
+The mock harness (`src/integration/demo-harness.test.tsx`) exercises queries, mutations, Zod errors, subscriptions, channels, batching, infinite queries, and the shared store without launching Electron.
+
+E2E sets `E2E=1` so native dialogs/notifications are stubbed in the example main process. See [`docs/REVIEW.md`](./docs/REVIEW.md) for the feature coverage matrix.
 
 ---
 
-## 📁 Example App
+## Example App
 
-A working Electron + Vite + React app lives in [`/example`](./example/):
+A full Electron + Vite + React demo lives in [`/example`](./example/):
 
 ```bash
+# from repo root
+npm run build
 cd example && npm install && npm run build && npx electron .
 ```
 
+Or during development: `cd example && npm run dev`.
+
+The example covers nested routers, batching, AbortSignal, infinite queries, channels, the shared store, and cross-window invalidation (with `{ webContents }` wired). More detail: [`example/README.md`](./example/README.md).
+
 ---
 
-## 🔧 Troubleshooting
+## Troubleshooting
+
+### Cross-window invalidate / store sync does nothing
+
+Pass Electron's `webContents` when binding:
+
+```ts
+import { ipcMain, webContents } from 'electron'
+bindIpcRouter(ipcMain, appRouter, createContext, { webContents })
+bindIpcStore(ipcMain, 'settings', settingsStore, { webContents })
+```
+
+Also mount `useIpcInvalidator(queryClient)` inside each window's React tree.
 
 ### Duplicate React / `useContext is null`
 
@@ -770,22 +848,31 @@ export default defineConfig({
 })
 ```
 
+### `Could not find window.electronIpc`
+
+Ensure preload calls `exposeIpc(contextBridge, ipcRenderer)` and the `BrowserWindow` sets `webPreferences.preload` with `contextIsolation: true`.
+
+### Nested queries fail only when batched
+
+Upgrade to a build that shares the procedure registry across nested routers (fixed in the 1.3.x review pass). Flat procedures were never affected.
+
 ---
 
-## 🗺️ Roadmap
+## Roadmap
 
 | Coming Soon | Status |
 |---|---|
-| **UI Form Generation** — Auto-generate typed React forms from Zod schemas | 🔜 Planned |
-| **React Native / Expo** — Extend the IPC pattern to mobile | 🔜 Planned |
-| **Auto-Reconnecting Subscriptions** — Exponential backoff on focus/network restore | 🔜 Planned |
-| **Optimistic Updates Helper** — Auto rollback on IPC error | 🔜 Planned |
+| **UI Form Generation** — Auto-generate typed React forms from Zod schemas | Planned |
+| **React Native / Expo** — Extend the IPC pattern to mobile | Planned |
+| **Auto-Reconnecting Subscriptions** — Exponential backoff on focus/network restore | Planned |
+| **Optimistic Updates Helper** — Auto rollback on IPC error | Planned |
+| **Auto-instrumented DevTools** — Optional wiring inside `bindIpcRouter` | Planned |
 
 ---
 
 <div align="center">
   <br />
-  <sub> Built to exponentially expand the boundaries of the Electron developer experience. </sub>
+  <sub>Built for a better Electron IPC developer experience.</sub>
   <br />
-  <sub> Made with ☕ and an unreasonable amount of TypeScript. </sub>
+  <sub>Made with TypeScript, Vitest, and Playwright.</sub>
 </div>

@@ -123,3 +123,7 @@ dist
 
 # Vitest
 html/
+
+# Playwright
+test-results/
+playwright-report/

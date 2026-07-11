@@ -1,7 +1,7 @@
 import type { ZodType } from "zod";
 import type { IpcMain, IpcMainInvokeEvent } from "electron";
 import { IpcError } from './errors';
-import type { ProcedureType, AnyProcedure, AnyRouter, Middleware } from './types';
+import type { ProcedureType, AnyProcedure, AnyRouter, Middleware, Procedure } from './types';
 
 export { IpcError } from './errors';
 export type { ProcedureType, AnyProcedure, AnyRouter, Middleware } from './types';
@@ -29,29 +29,29 @@ export class ProcedureBuilder<TInput = void, TContext = any> {
   }
 
   /** Define a read-only query procedure. */
-  query<TOutput>(resolver: (opts: { input: TInput; ctx: TContext; signal?: AbortSignal; broadcast: { invalidate: (path: string) => void } }) => Promise<TOutput> | TOutput): AnyProcedure {
+  query<TOutput>(resolver: (opts: { input: TInput; ctx: TContext; signal?: AbortSignal; broadcast: { invalidate: (path: string) => void } }) => Promise<TOutput> | TOutput): Procedure<TInput, TOutput, 'query', TContext> {
     return this.createProcedure('query', resolver);
   }
 
   /** Define a write/mutation procedure. */
-  mutation<TOutput>(resolver: (opts: { input: TInput; ctx: TContext; signal?: AbortSignal; broadcast: { invalidate: (path: string) => void } }) => Promise<TOutput> | TOutput): AnyProcedure {
+  mutation<TOutput>(resolver: (opts: { input: TInput; ctx: TContext; signal?: AbortSignal; broadcast: { invalidate: (path: string) => void } }) => Promise<TOutput> | TOutput): Procedure<TInput, TOutput, 'mutation', TContext> {
     return this.createProcedure('mutation', resolver);
   }
 
   /** Define a subscription procedure (main → renderer push). */
-  subscription<TOutput>(resolver: (opts: { input: TInput; ctx: TContext; emit: (data: TOutput) => void; signal?: AbortSignal; broadcast: { invalidate: (path: string) => void } }) => Promise<void | (() => void)> | void | (() => void)): AnyProcedure {
+  subscription<TOutput>(resolver: (opts: { input: TInput; ctx: TContext; emit: (data: TOutput) => void; signal?: AbortSignal; broadcast: { invalidate: (path: string) => void } }) => Promise<void | (() => void)> | void | (() => void)): Procedure<TInput, TOutput, 'subscription', TContext> {
     return this.createProcedure('subscription', resolver as any);
   }
 
   /** Define a bidirectional channel procedure (main ↔ renderer). */
-  channel<TOutput>(resolver: (opts: { input: TInput; ctx: TContext; emit: (data: TOutput) => void; onData: (listener: (data: any) => void) => void; signal?: AbortSignal; broadcast: { invalidate: (path: string) => void } }) => Promise<void | (() => void)> | void | (() => void)): AnyProcedure {
+  channel<TOutput>(resolver: (opts: { input: TInput; ctx: TContext; emit: (data: TOutput) => void; onData: (listener: (data: any) => void) => void; signal?: AbortSignal; broadcast: { invalidate: (path: string) => void } }) => Promise<void | (() => void)> | void | (() => void)): Procedure<TInput, TOutput, 'channel', TContext> {
     return this.createProcedure('channel', resolver as any);
   }
 
   private createProcedure<TOutput, TType extends ProcedureType>(
     type: TType,
     resolver: (opts: { input: TInput; ctx: TContext; emit: (data: any) => void; onData: (listener: (data: any) => void) => void; signal?: AbortSignal; broadcast: { invalidate: (path: string) => void } }) => any
-  ): AnyProcedure {
+  ): Procedure<TInput, TOutput, TType, TContext> {
     const procedure = async (opts: { input: TInput; ctx: TContext; path: string; emit?: (data: TOutput) => void; onData?: (listener: (data: any) => void) => void; signal?: AbortSignal; broadcast: { invalidate: (path: string) => void } }) => {
       let validInput = opts.input;
       if (this.schema) {
@@ -84,7 +84,7 @@ export class ProcedureBuilder<TInput = void, TContext = any> {
     procedure._output = null as unknown as TOutput;
     procedure._ctx = null as unknown as TContext;
 
-    return procedure as any;
+    return procedure as Procedure<TInput, TOutput, TType, TContext>;
   }
 }
 
@@ -156,7 +156,7 @@ export function bindIpcStore<T extends Record<string, any>>(
     }
   };
 
-  store.subscribe(broadcast);
+  const unsubscribe = store.subscribe(broadcast);
 
   ipcMain.handle(`__ipc_store_${storeName}_get`, () => store.get());
   
@@ -172,6 +172,7 @@ export function bindIpcStore<T extends Record<string, any>>(
 
   // Return cleanup function
   return () => {
+    unsubscribe();
     ipcMain.removeHandler(`__ipc_store_${storeName}_get`);
     ipcMain.removeHandler(`__ipc_store_${storeName}_set`);
     ipcMain.removeHandler(`__ipc_store_${storeName}_reset`);
@@ -193,13 +194,18 @@ export function bindIpcRouter(
   router: AnyRouter,
   createContext?: (event: IpcMainInvokeEvent) => any | Promise<any>,
   options: { webContents?: any } = {},
-  path = ''
+  path = '',
+  shared?: {
+    registeredProcedures: Map<string, AnyProcedure>;
+    globalActiveRequests: Map<string, AbortController>;
+  }
 ): () => void {
-  // Per-call state — avoids global mutable singletons
-  const registeredProcedures = new Map<string, AnyProcedure>();
-  const globalActiveRequests = new Map<string, AbortController>();
+  // Shared across nested router binds so batching + abort work for nested paths
+  const registeredProcedures = shared?.registeredProcedures ?? new Map<string, AnyProcedure>();
+  const globalActiveRequests = shared?.globalActiveRequests ?? new Map<string, AbortController>();
   const registeredHandlers: string[] = [];
   const abortListeners: Array<{ channel: string; handler: (...args: any[]) => void }> = [];
+  const childDisposes: Array<() => void> = [];
 
   const wContents = options.webContents || null;
 
@@ -280,6 +286,11 @@ export function bindIpcRouter(
             globalActiveRequests.delete(invokeId);
           }
         };
+        // Safe re-bind: clear prior abort listeners / handle for this path (HMR, tests)
+        if (typeof (ipcMain as any).removeAllListeners === 'function') {
+          (ipcMain as any).removeAllListeners(`${currentPath}.abort`);
+        }
+        ipcMain.removeHandler(currentPath);
         ipcMain.on(`${currentPath}.abort`, abortHandler);
         abortListeners.push({ channel: `${currentPath}.abort`, handler: abortHandler });
 
@@ -315,6 +326,14 @@ export function bindIpcRouter(
         const activeSubscriptions = new Map<string, () => void>();
         const activeListeners = new Map<string, (data: any) => void>();
 
+        const sendSubscriptionError = (event: any, __subId: string | undefined, error: any) => {
+          if (!__subId || !event?.sender || event.sender.isDestroyed?.()) return;
+          event.sender.send(currentPath, {
+            __subId,
+            __error: handleProcedureError(error),
+          });
+        };
+
         const subscriptionHandler = async (event: any, payload: any) => {
           try {
             if (payload && payload.__action === 'subscribe') {
@@ -348,6 +367,11 @@ export function bindIpcRouter(
                   activeListeners.delete(__subId);
                   cleanup();
                 });
+              } else if (process.env.NODE_ENV !== 'production') {
+                console.warn(
+                  `[electron-ipc-react-hooks] ${procedure._type} "${currentPath}" did not return a cleanup function; ` +
+                    'unsubscribe will not stop server-side work.'
+                );
               }
             } else if (payload && payload.__action === 'unsubscribe') {
               const { __subId } = payload;
@@ -361,7 +385,12 @@ export function bindIpcRouter(
                const { __subId, data } = payload;
                const listener = activeListeners.get(__subId);
                if (listener) {
-                 listener(data);
+                 try {
+                   listener(data);
+                 } catch (error) {
+                   console.error(`Error in channel listener ${currentPath}:`, error);
+                   sendSubscriptionError(event, __subId, error);
+                 }
                }
             } else {
               // Legacy support for basic subscription calls without teardown wrapper
@@ -375,27 +404,45 @@ export function bindIpcRouter(
             }
           } catch (error) {
             console.error(`Error in subscription ${currentPath}:`, error);
+            sendSubscriptionError(event, payload?.__subId, error);
           }
         };
 
+        // Safe re-bind: drop any prior listeners on this channel before registering
+        if (typeof (ipcMain as any).removeAllListeners === 'function') {
+          (ipcMain as any).removeAllListeners(currentPath);
+        }
         ipcMain.on(currentPath, subscriptionHandler);
         abortListeners.push({ channel: currentPath, handler: subscriptionHandler });
       }
     } else {
-      // Nested router — recursively bind
-      bindIpcRouter(ipcMain, value as AnyRouter, createContext, options, currentPath);
+      // Nested router — recursively bind with shared procedure/abort maps
+      const disposeChild = bindIpcRouter(
+        ipcMain,
+        value as AnyRouter,
+        createContext,
+        options,
+        currentPath,
+        { registeredProcedures, globalActiveRequests }
+      );
+      childDisposes.push(disposeChild);
     }
   }
 
   // Return cleanup/dispose function
   return () => {
+    for (const disposeChild of childDisposes) {
+      disposeChild();
+    }
     for (const handler of registeredHandlers) {
       ipcMain.removeHandler(handler);
     }
     for (const { channel, handler } of abortListeners) {
       ipcMain.removeListener(channel, handler);
     }
-    globalActiveRequests.clear();
-    registeredProcedures.clear();
+    if (path === '') {
+      globalActiveRequests.clear();
+      registeredProcedures.clear();
+    }
   };
 }

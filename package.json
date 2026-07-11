@@ -1,6 +1,6 @@
 {
   "name": "electron-ipc-react-hooks",
-  "version": "1.3.0",
+  "version": "1.3.1",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -56,6 +56,8 @@
   "scripts": {
     "build": "tsc",
     "test": "vitest run",
+    "test:harness": "vitest run src/integration/demo-harness.test.tsx",
+    "test:e2e": "npm run build && npm run build --prefix example && playwright test",
     "prepublishOnly": "npm run build"
   },
   "peerDependencies": {
@@ -65,7 +67,9 @@
     "zod": ">=3.0.0"
   },
   "devDependencies": {
+    "@playwright/test": "^1.61.1",
     "@tanstack/react-query": "^5.99.0",
+    "@testing-library/dom": "^10.4.1",
     "@testing-library/react": "^16.3.2",
     "@types/node": "^25.6.0",
     "@types/react": "^19.2.14",

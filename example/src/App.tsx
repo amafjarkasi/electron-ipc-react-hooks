@@ -58,7 +58,7 @@ function App() {
         <div className="card-grid">
 
           {/* Shared Store Demo */}
-          <div className="card" style={{ gridColumn: '1 / -1' }}>
+          <div className="card" style={{ gridColumn: '1 / -1' }} data-testid="card-store">
             <div className="card-header">
               <div className="card-icon blue">🌐</div>
               <h2>Shared Reactive Store</h2>
@@ -67,28 +67,28 @@ function App() {
               A global state object synced natively between the Main process and all active Renderer windows.
             </p>
             <div className="result-block" style={{ marginTop: '10px', display: 'flex', gap: '20px', alignItems: 'center' }}>
-               <div>
+               <div data-testid="store-theme">
                   <strong>Theme:</strong> {settings.theme}
                </div>
-               <button onClick={() => setSettings(s => ({ ...s, theme: s.theme === 'dark' ? 'light' : 'dark' }))}>
+               <button data-testid="toggle-theme" onClick={() => setSettings(s => ({ ...s, theme: s.theme === 'dark' ? 'light' : 'dark' }))}>
                  Toggle Theme
                </button>
 
-               <div style={{ marginLeft: 'auto' }}>
+               <div style={{ marginLeft: 'auto' }} data-testid="store-notifications">
                   <strong>Notifications:</strong> {settings.notifications ? 'ON' : 'OFF'}
                </div>
-               <button onClick={() => setSettings({ notifications: !settings.notifications })}>
+               <button data-testid="toggle-notifications" onClick={() => setSettings({ notifications: !settings.notifications })}>
                  Toggle Notifications
                </button>
                
-               <button onClick={() => resetSettings()} className="danger" style={{ marginLeft: 'auto' }}>
+               <button data-testid="reset-settings" onClick={() => resetSettings()} className="danger" style={{ marginLeft: 'auto' }}>
                  Reset Defaults
                </button>
             </div>
           </div>
 
           {/* System Info */}
-          <div className="card">
+          <div className="card" data-testid="card-system">
             <div className="card-header">
               <div className="card-icon blue">🖥️</div>
               <h2>System Context</h2>
@@ -96,9 +96,9 @@ function App() {
             {sysLoading ? (
               <p className="subtitle">Fetching from main process…</p>
             ) : (
-              <table className="data-table">
+              <table className="data-table" data-testid="sys-info-table">
                 <tbody>
-                  <tr><td>Platform</td><td>{sysInfo?.platform}</td></tr>
+                  <tr><td>Platform</td><td data-testid="sys-platform">{sysInfo?.platform}</td></tr>
                   <tr><td>Architecture</td><td>{sysInfo?.arch}</td></tr>
                   <tr><td>Node Version</td><td>{sysInfo?.nodeVersion}</td></tr>
                   <tr><td>Electron</td><td>{sysInfo?.electronVersion}</td></tr>
@@ -114,7 +114,7 @@ function App() {
             {helloLoading ? (
               <p className="subtitle">Fetching greeting…</p>
             ) : (
-              <div className="result-block" style={{ marginTop: '10px' }}>
+              <div className="result-block" style={{ marginTop: '10px' }} data-testid="hello-msg">
                 <div className="result-label">Greeting</div>
                 {helloMsg}
               </div>
@@ -150,7 +150,7 @@ function App() {
           </div>
 
           {/* Clock Subscription */}
-          <div className="card">
+          <div className="card" data-testid="card-clock">
             <div className="card-header">
               <div className="card-icon blue">⏱️</div>
               <h2>Real-time Subscription</h2>
@@ -158,13 +158,13 @@ function App() {
             <p className="subtitle">
               Demonstrates continuous stream of data from the main process over an IPC channel.
             </p>
-            <div className="result-block" style={{ marginTop: '10px', fontFamily: 'monospace', fontSize: '1.2em' }}>
+            <div className="result-block" style={{ marginTop: '10px', fontFamily: 'monospace', fontSize: '1.2em' }} data-testid="clock-data">
               {clockData}
             </div>
           </div>
 
           {/* Echo Mutation */}
-          <div className="card">
+          <div className="card" data-testid="card-echo">
             <div className="card-header">
               <div className="card-icon purple">🔄</div>
               <h2>IPC Mutation</h2>
@@ -179,8 +179,10 @@ function App() {
                 value={inputText}
                 onChange={e => setInputText(e.target.value)}
                 onKeyDown={e => e.key === 'Enter' && echoMutation.mutate({ text: inputText })}
+                data-testid="echo-input"
               />
               <button
+                data-testid="echo-send"
                 onClick={() => echoMutation.mutate({ text: inputText })}
                 disabled={echoMutation.isPending || !inputText.trim()}
               >
@@ -188,7 +190,7 @@ function App() {
               </button>
             </div>
             {echoMutation.data && (
-              <div className="result-block">
+              <div className="result-block" data-testid="echo-result">
                 <div className="result-label">Result</div>
                 {echoMutation.data}
               </div>
@@ -196,7 +198,7 @@ function App() {
           </div>
 
           {/* Error Handling */}
-          <div className="card" style={{ gridColumn: '1 / -1' }}>
+          <div className="card" style={{ gridColumn: '1 / -1' }} data-testid="card-errors">
             <div className="card-header">
               <div className="card-icon red">🛡️</div>
               <h2>Error Boundaries & Validation</h2>
@@ -210,13 +212,14 @@ function App() {
                 <h3>1. Expected Error</h3>
                 <button
                   className="danger"
+                  data-testid="trigger-error"
                   onClick={() => errorMutation.mutate({ shouldThrow: true })}
                   disabled={errorMutation.isPending}
                 >
                   {errorMutation.isPending ? 'Throwing…' : 'Trigger Main Process Error'}
                 </button>
                 {errorMutation.error && (
-                  <div className="error-block" style={{ marginTop: '10px' }}>
+                  <div className="error-block" style={{ marginTop: '10px' }} data-testid="error-caught">
                     <strong>Caught:</strong> {errorMutation.error.message}
                   </div>
                 )}
@@ -229,8 +232,10 @@ function App() {
                     type="text"
                     placeholder="Type name (e.g., 'a' or 'admin')..."
                     id="profile-name"
+                    data-testid="profile-name"
                   />
                   <button
+                    data-testid="save-profile"
                     onClick={() => {
                       const val = (document.getElementById('profile-name') as HTMLInputElement).value;
                       saveProfileMutation.mutate({ name: val });
@@ -241,7 +246,7 @@ function App() {
                   </button>
                 </div>
                 {saveProfileMutation.error && (
-                  <div className="error-block" style={{ marginTop: '10px' }}>
+                  <div className="error-block" style={{ marginTop: '10px' }} data-testid="zod-error">
                     <strong>Code:</strong> {(saveProfileMutation.error as any).code}<br/>
                     <strong>Message:</strong> {saveProfileMutation.error.message}<br/>
                     <pre style={{ fontSize: '11px', marginTop: '5px', whiteSpace: 'pre-wrap' }}>
@@ -250,7 +255,7 @@ function App() {
                   </div>
                 )}
                 {saveProfileMutation.data && (
-                  <div className="result-block" style={{ marginTop: '10px', borderColor: 'green' }}>
+                  <div className="result-block" style={{ marginTop: '10px', borderColor: 'green' }} data-testid="zod-success">
                     Success!
                   </div>
                 )}
@@ -349,25 +354,25 @@ function BatchingDemo() {
   const isFetching = q1.isFetching || q2.isFetching || q3.isFetching;
 
   return (
-    <div style={{ marginTop: '15px' }}>
+    <div style={{ marginTop: '15px' }} data-testid="batching-demo">
       <div className="input-group">
-        <button onClick={() => setTrigger(true)} disabled={trigger || isFetching}>
+        <button data-testid="batch-trigger" onClick={() => setTrigger(true)} disabled={trigger || isFetching}>
           Trigger 3 Concurrent Queries
         </button>
-        <button className="danger" onClick={() => setTrigger(false)} disabled={!trigger}>
+        <button className="danger" data-testid="batch-reset" onClick={() => setTrigger(false)} disabled={!trigger}>
           Reset
         </button>
       </div>
 
       {trigger && (
-        <div className="result-block" style={{ marginTop: '10px', display: 'flex', gap: '20px' }}>
+        <div className="result-block" style={{ marginTop: '10px', display: 'flex', gap: '20px' }} data-testid="batch-results">
           {isFetching ? (
             <span>Fetching via single IPC batch...</span>
           ) : (
             <>
-              <div>2² = {q1.data}</div>
-              <div>5² = {q2.data}</div>
-              <div>10² = {q3.data}</div>
+              <div data-testid="batch-q1">2² = {q1.data}</div>
+              <div data-testid="batch-q2">5² = {q2.data}</div>
+              <div data-testid="batch-q3">10² = {q3.data}</div>
             </>
           )}
         </div>
@@ -384,12 +389,12 @@ function SlowQueryDemo() {
   });
 
   return (
-    <div style={{ marginTop: '15px' }}>
+    <div style={{ marginTop: '15px' }} data-testid="slow-query-demo">
       <div className="input-group">
         {!trigger ? (
-          <button onClick={() => setTrigger(true)}>Start 5s Query</button>
+          <button data-testid="slow-start" onClick={() => setTrigger(true)}>Start 5s Query</button>
         ) : (
-          <button className="danger" onClick={() => {
+          <button className="danger" data-testid="slow-cancel" onClick={() => {
             setTrigger(false);
           }}>
             Cancel Query Component
@@ -398,7 +403,7 @@ function SlowQueryDemo() {
       </div>
 
       {trigger && (
-        <div className="result-block" style={{ marginTop: '10px' }}>
+        <div className="result-block" style={{ marginTop: '10px' }} data-testid="slow-result">
           {query.isLoading ? 'Loading heavily (Check terminal console)...' : query.data}
           {query.error && <div style={{ color: 'red' }}>{query.error.message}</div>}
         </div>
@@ -417,14 +422,14 @@ function InfiniteQueryDemo() {
   );
 
   return (
-    <div style={{ marginTop: '15px' }}>
+    <div style={{ marginTop: '15px' }} data-testid="infinite-demo">
       {status === 'pending' ? (
         <p>Loading initial items...</p>
       ) : status === 'error' ? (
         <p>Error: Could not load items</p>
       ) : (
         <>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '5px', maxHeight: '200px', overflowY: 'auto', background: '#f5f5f5', border: '1px solid #ddd', padding: '10px', borderRadius: '4px' }}>
+          <div data-testid="infinite-list" style={{ display: 'flex', flexDirection: 'column', gap: '5px', maxHeight: '200px', overflowY: 'auto', background: '#f5f5f5', border: '1px solid #ddd', padding: '10px', borderRadius: '4px' }}>
             {data.pages.map((page, i) => (
               <div key={i} style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
                 {page.items.map((item) => (
@@ -438,6 +443,7 @@ function InfiniteQueryDemo() {
           
           <div style={{ marginTop: '10px' }}>
             <button
+              data-testid="infinite-load-more"
               onClick={() => fetchNextPage()}
               disabled={!hasNextPage || isFetchingNextPage}
             >
@@ -485,11 +491,11 @@ function ChannelDemo() {
   };
 
   return (
-    <div style={{ marginTop: '15px' }}>
-      <button onClick={startStream} disabled={isSending}>
+    <div style={{ marginTop: '15px' }} data-testid="channel-demo">
+      <button data-testid="channel-start" onClick={startStream} disabled={isSending}>
         {isSending ? 'Streaming...' : 'Start 5KB Stream to Main'}
       </button>
-      <div style={{ marginTop: '10px', maxHeight: '150px', overflowY: 'auto', background: '#1e1e1e', color: '#00ff00', padding: '10px', borderRadius: '4px', fontFamily: 'monospace', fontSize: '12px' }}>
+      <div data-testid="channel-logs" style={{ marginTop: '10px', maxHeight: '150px', overflowY: 'auto', background: '#1e1e1e', color: '#00ff00', padding: '10px', borderRadius: '4px', fontFamily: 'monospace', fontSize: '12px' }}>
         {logs.length === 0 ? 'Waiting for stream...' : logs.map((log, i) => (
           <div key={i} style={{ color: log.startsWith('[Main]') ? '#ff00ff' : '#00ffff' }}>{log}</div>
         ))}
