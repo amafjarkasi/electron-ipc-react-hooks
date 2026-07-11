@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="./.github/assets/hero-v4.svg" alt="electron-ipc-react-hooks — type-safe Electron IPC with React Query hooks" width="100%">
+  <img src="https://raw.githubusercontent.com/amafjarkasi/electron-ipc-react-hooks/main/.github/assets/hero-v2.png" alt="electron-ipc-react-hooks — type-safe Electron IPC with React Query hooks" width="100%">
 
   <br />
   <br />
