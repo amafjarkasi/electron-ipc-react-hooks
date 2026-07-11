@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="240" viewBox="0 0 960 240" role="img" aria-label="electron-ipc-react-hooks">
+  <rect width="960" height="240" rx="20" fill="#0f1419"/>
+  <rect x="0.75" y="0.75" width="958.5" height="238.5" rx="20" fill="none" stroke="#2a3441" stroke-width="1.5"/>
+
+  <!-- Brand mark: two nodes bridged -->
+  <g transform="translate(72, 72)">
+    <rect x="0" y="18" width="48" height="48" rx="12" fill="#1a222d" stroke="#4fc3f7" stroke-width="2.5"/>
+    <rect x="88" y="18" width="48" height="48" rx="12" fill="#1a222d" stroke="#4fc3f7" stroke-width="2.5"/>
+    <line x1="48" y1="42" x2="88" y2="42" stroke="#4fc3f7" stroke-width="3" stroke-linecap="round"/>
+    <circle cx="68" cy="42" r="5" fill="#4fc3f7"/>
+  </g>
+
+  <!-- Wordmark -->
+  <text x="260" y="112"
+        font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif"
+        font-size="36" font-weight="650" letter-spacing="-0.5" fill="#e8eef4">electron-ipc-react-hooks</text>
+  <text x="260" y="148"
+        font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif"
+        font-size="16" font-weight="500" fill="#8b9aab">Type-safe Electron IPC</text>
+</svg>
