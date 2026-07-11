@@ -1,0 +1,52 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="800" height="220" viewBox="0 0 800 220" role="img" aria-label="electron-ipc-react-hooks">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#0f1419"/>
+      <stop offset="100%" stop-color="#161c24"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="800" height="220" rx="14" fill="url(#bg)"/>
+  <rect x="0.5" y="0.5" width="799" height="219" rx="14" fill="none" stroke="#2a3441" stroke-width="1"/>
+
+  <!-- Eyebrow -->
+  <text x="400" y="48" text-anchor="middle"
+        font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif"
+        font-size="11" font-weight="600" letter-spacing="2.4" fill="#8b9aab">TYPE-SAFE ELECTRON IPC</text>
+
+  <!-- Brand -->
+  <text x="400" y="92" text-anchor="middle"
+        font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif"
+        font-size="28" font-weight="650" letter-spacing="-0.4" fill="#e8eef4">electron-ipc-react-hooks</text>
+
+  <!-- Accent rule -->
+  <rect x="360" y="106" width="80" height="2" rx="1" fill="#4fc3f7"/>
+
+  <!-- Tagline -->
+  <text x="400" y="132" text-anchor="middle"
+        font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif"
+        font-size="13" font-weight="450" fill="#8b9aab">React Query hooks · Zod · end-to-end types</text>
+
+  <!-- Architecture strip -->
+  <g font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="13" font-weight="600" fill="#c5d0db">
+    <!-- Main -->
+    <rect x="140" y="156" width="120" height="36" rx="8" fill="#1a222d" stroke="#2d3a49"/>
+    <text x="200" y="179" text-anchor="middle">Main</text>
+
+    <line x1="260" y1="174" x2="300" y2="174" stroke="#3d4f63" stroke-width="1.5"/>
+    <circle cx="260" cy="174" r="2.5" fill="#4fc3f7"/>
+    <circle cx="300" cy="174" r="2.5" fill="#4fc3f7"/>
+
+    <!-- Preload -->
+    <rect x="300" y="156" width="120" height="36" rx="8" fill="#1a222d" stroke="#2d3a49"/>
+    <text x="360" y="179" text-anchor="middle">Preload</text>
+
+    <line x1="420" y1="174" x2="460" y2="174" stroke="#3d4f63" stroke-width="1.5"/>
+    <circle cx="420" cy="174" r="2.5" fill="#4fc3f7"/>
+    <circle cx="460" cy="174" r="2.5" fill="#4fc3f7"/>
+
+    <!-- Renderer -->
+    <rect x="460" y="156" width="120" height="36" rx="8" fill="#1a222d" stroke="#2d3a49"/>
+    <text x="520" y="179" text-anchor="middle">Renderer</text>
+  </g>
+</svg>
